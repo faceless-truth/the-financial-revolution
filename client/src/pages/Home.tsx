@@ -12,14 +12,12 @@ import {
   signalActionLabel,
   signalActionClass,
   cashTriggerClass,
-  regimeLabel,
-  regimeClass,
   momentumClass,
   drawdownClass,
   timeAgo,
 } from "@/lib/formatters";
 import { useEffect, useState } from "react";
-import { RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, Clock, Zap, Target, BarChart2, Activity, Shield } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, Clock, Zap, Target, BarChart2, Activity } from "lucide-react";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/dashboard-hero-bg-hgsqEWzXFhZWuFZbadExQL.webp";
 
@@ -263,8 +261,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── ROW 1: Signal + BTC Health + Market Regime ─────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* ── ROW 1: Signal + Re-Entry Trigger ─────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
           {/* TODAY'S SIGNAL */}
           <div className="panel p-5 flex flex-col gap-4 glow-blue" style={{ borderColor: "oklch(0.60 0.22 255 / 20%)" }}>
@@ -343,7 +341,70 @@ export default function Home() {
             ) : null}
           </div>
 
-          {/* BTC HEALTH */}
+          {/* RE-ENTRY TRIGGER — 2nd position */}
+          <div className="panel p-5 flex flex-col gap-4">
+            <SectionHeader icon={<TrendingUp size={14} />} title="Re-Entry Trigger" subtitle="BTC price needed to flip 30-day momentum positive" />
+            {loading && !signal ? (
+              <div className="space-y-3">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : signal ? (
+              <div className="space-y-4">
+                {signal.reentry.alreadyMet ? (
+                  <div className="flex items-center gap-3 p-4 rounded-lg border border-emerald-500/30 bg-emerald-500/8">
+                    <CheckCircle size={20} className="text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-300">Momentum Already Positive</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">BTC 30-day momentum is positive — re-entry trigger already met</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 rounded-lg border border-border/40" style={{ background: "oklch(1 0 0 / 3%)" }}>
+                        <p className="text-xs text-muted-foreground mb-1">Trigger Price</p>
+                        <p className="text-xl font-bold mono-data text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+                          {formatPrice(signal.reentry.triggerPrice)}
+                        </p>
+                        <p className="text-xs text-muted-foreground/60 mt-0.5">BTC close from 30 days ago</p>
+                      </div>
+                      <div className="p-3 rounded-lg border border-border/40" style={{ background: "oklch(1 0 0 / 3%)" }}>
+                        <p className="text-xs text-muted-foreground mb-1">Gap to Trigger</p>
+                        <p className={`text-xl font-bold mono-data ${signal.reentry.gapPct >= 0 ? "text-emerald-400" : "text-red-400"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                          {formatPct(signal.reentry.gapPct)}
+                        </p>
+                        <p className="text-xs text-muted-foreground/60 mt-0.5">{signal.reentry.gapUsd >= 0 ? "+" : ""}{formatPrice(Math.abs(signal.reentry.gapUsd), 0)} USD</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      When BTC closes above <span className="text-white font-semibold mono-data">{formatPrice(signal.reentry.triggerPrice)}</span>, the 30-day momentum flips positive and re-entry is evaluated.
+                    </p>
+                  </div>
+                )}
+                {signal.reentry.rollingTriggers.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Rolling Thresholds (window shifts daily)</p>
+                    <div className="space-y-1.5">
+                      {signal.reentry.rollingTriggers.map((r) => (
+                        <div key={r.daysFromNow} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground mono-data">In {r.daysFromNow}d</span>
+                          <span className="font-semibold mono-data text-foreground/80">{formatPrice(r.triggerPrice)}</span>
+                          <span className={`mono-data ${r.deltaVsTodayUsd < 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                            {r.deltaVsTodayUsd < 0 ? "↓ drops" : "↑ rises"} {formatPct(Math.abs(r.deltaVsTodayPct), false)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* ── ROW 1b: BTC Health (full width) ─────────────────────────────────── */}
+        <div className="grid grid-cols-1 gap-4">
           <div className="panel p-5 flex flex-col gap-4">
             <SectionHeader icon={<Activity size={14} />} title="BTC Health" subtitle="30-day drawdown & cash triggers" />
             {loading && !signal ? (
@@ -430,73 +491,6 @@ export default function Home() {
             ) : null}
           </div>
 
-          {/* MARKET REGIME */}
-          <div className="panel p-5 flex flex-col gap-4">
-            <SectionHeader icon={<Shield size={14} />} title="Market Regime" subtitle="Strategy mode & composite score" />
-            {loading && !signal ? (
-              <div className="space-y-3">
-                <Skeleton className="h-10 w-36" />
-                <Skeleton className="h-4 w-full" />
-              </div>
-            ) : signal ? (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2">Current Regime</p>
-                  <span className={`${regimeClass(signal.marketRegime)} border rounded-lg px-4 py-2 text-base font-bold tracking-wide`} style={{ fontFamily: "Syne, sans-serif" }}>
-                    {regimeLabel(signal.marketRegime)}
-                  </span>
-                </div>
-
-                {/* Composite score */}
-                <div>
-                  <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
-                    <span>Composite Score (1 − drawdown)</span>
-                    <span className="font-semibold mono-data text-foreground">{signal.compositeScore.toFixed(3)}</span>
-                  </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ background: "oklch(1 0 0 / 8%)" }}>
-                    <div
-                      className="h-full rounded-full transition-all duration-700"
-                      style={{
-                        width: `${Math.min(signal.compositeScore * 100, 100)}%`,
-                        background: signal.compositeScore > 0.88 ? "oklch(0.72 0.18 155)" : signal.compositeScore > 0.75 ? "oklch(0.78 0.18 75)" : "oklch(0.62 0.22 25)",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Strategy stats */}
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  {[
-                    { label: "Backtest Return", value: "+413%", color: "text-emerald-400" },
-                    { label: "vs BTC", value: "+211pp", color: "text-emerald-400" },
-                    { label: "Max Drawdown", value: "53–60%", color: "text-amber-400" },
-                    { label: "Trades / 5yr", value: "~230", color: "text-primary" },
-                  ].map(({ label, value, color }) => (
-                    <div key={label} className="p-2.5 rounded-lg" style={{ background: "oklch(1 0 0 / 4%)" }}>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className={`text-sm font-bold mono-data ${color}`}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Universe */}
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2">Trading Universe</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["BTC", "ETH", "SOL", "SUI", "DOGE"].map((a) => (
-                      <span
-                        key={a}
-                        className="text-xs px-2 py-1 rounded border font-semibold"
-                        style={{ borderColor: `${ASSET_COLORS[a]}40`, color: ASSET_COLORS[a], background: `${ASSET_COLORS[a]}10` }}
-                      >
-                        {ASSET_ICONS[a]} {a}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
         </div>
 
         {/* ── ROW 2: Momentum Scores + Decision Flow ──────────────────────────── */}
@@ -680,102 +674,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── ROW 3: Re-Entry Trigger + Per-Asset Detail ──────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-          {/* RE-ENTRY TRIGGER */}
-          <div className="panel p-5">
-            <SectionHeader icon={<TrendingUp size={14} />} title="Re-Entry Trigger" subtitle="BTC price needed to flip 30-day momentum positive" />
-            {loading && !signal ? (
-              <div className="space-y-3">
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : signal ? (
-              <div className="space-y-4">
-                {signal.reentry.alreadyMet ? (
-                  <div className="flex items-center gap-3 p-4 rounded-lg border border-emerald-500/30 bg-emerald-500/8">
-                    <CheckCircle size={20} className="text-emerald-400 shrink-0" />
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-300">Momentum Already Positive</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">BTC 30-day momentum is positive — re-entry trigger already met</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="p-3 rounded-lg border border-border/40" style={{ background: "oklch(1 0 0 / 3%)" }}>
-                        <p className="text-xs text-muted-foreground mb-1">Trigger Price</p>
-                        <p className="text-xl font-bold mono-data text-white" style={{ fontFamily: "Syne, sans-serif" }}>
-                          {formatPrice(signal.reentry.triggerPrice)}
-                        </p>
-                        <p className="text-xs text-muted-foreground/60 mt-0.5">BTC close from 30 days ago</p>
-                      </div>
-                      <div className="p-3 rounded-lg border border-border/40" style={{ background: "oklch(1 0 0 / 3%)" }}>
-                        <p className="text-xs text-muted-foreground mb-1">Gap to Trigger</p>
-                        <p className={`text-xl font-bold mono-data ${signal.reentry.gapPct >= 0 ? "text-emerald-400" : "text-red-400"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                          {formatPct(signal.reentry.gapPct)}
-                        </p>
-                        <p className="text-xs text-muted-foreground/60 mt-0.5">{signal.reentry.gapUsd >= 0 ? "+" : ""}{formatPrice(Math.abs(signal.reentry.gapUsd), 0)} USD</p>
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      When BTC closes above <span className="text-white font-semibold mono-data">{formatPrice(signal.reentry.triggerPrice)}</span>, the 30-day momentum flips positive and re-entry is evaluated.
-                    </p>
-                  </div>
-                )}
-
-                {/* Rolling 7-day thresholds */}
-                {signal.reentry.rollingTriggers.length > 0 && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-2">Rolling Thresholds (window shifts daily)</p>
-                    <div className="space-y-1.5">
-                      {signal.reentry.rollingTriggers.map((r) => (
-                        <div key={r.daysFromNow} className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground mono-data">In {r.daysFromNow}d</span>
-                          <span className="font-semibold mono-data text-foreground/80">{formatPrice(r.triggerPrice)}</span>
-                          <span className={`mono-data ${r.deltaVsTodayUsd < 0 ? "text-emerald-400" : "text-amber-400"}`}>
-                            {r.deltaVsTodayUsd < 0 ? "↓ drops" : "↑ rises"} {formatPct(Math.abs(r.deltaVsTodayPct), false)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>
-
-          {/* STRATEGY PARAMETERS */}
-          <div className="panel p-5">
-            <SectionHeader icon={<Clock size={14} />} title="Strategy Parameters" subtitle="TREND_CONFIRM v7.0 Conservative configuration" />
-            <div className="space-y-1">
-              {[
-                { label: "Momentum Period", value: "30 days", note: "vs 14-day in v6.1 — reduces noise" },
-                { label: "High Lookback", value: "30 days", note: "rolling max window" },
-                { label: "Cash Trigger (Partial)", value: "BTC −12%", note: "→ 50% allocation" },
-                { label: "Cash Trigger (Full)", value: "BTC −25%", note: "→ 0% allocation" },
-                { label: "Min Hold Period", value: "14 days", note: "prevents whipsaw" },
-                { label: "BTC Rally Detection", value: "5 days", note: "new high lookback" },
-                { label: "Breakout Threshold", value: "5% from high", note: "alt entry filter" },
-                { label: "Universe", value: "BTC ETH SOL SUI DOGE", note: "5 majors" },
-                { label: "SUI / DOGE Cap", value: "60%", note: "BTC/ETH/SOL = 100%" },
-                { label: "Leverage", value: "Disabled", note: "conservative mode" },
-                { label: "Data Source", value: "Binance API", note: "live daily candles" },
-                { label: "Execution", value: "Daily candle close", note: "once per day" },
-              ].map(({ label, value, note }) => (
-                <div key={label} className="flex items-center justify-between py-2 border-b border-border/20 last:border-0">
-                  <div>
-                    <p className="text-xs text-foreground/80">{label}</p>
-                    <p className="text-xs text-muted-foreground/50">{note}</p>
-                  </div>
-                  <span className="text-xs font-semibold mono-data text-primary/90 text-right">{value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
         {/* ── ROW 3.5: BTC 30-day chart ───────────────────────────────────────── */}
         {rawData.BTC && rawData.BTC.length >= 30 && (
