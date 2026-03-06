@@ -1,0 +1,672 @@
+/**
+ * Portfolio — $50,000 Forward Simulation
+ * Design: Dark Precision — same system as main dashboard
+ *
+ * Shows: live portfolio value, equity curve vs BTC hold, current position,
+ * P&L, min-hold countdown, next execution window, and full trade log.
+ */
+
+import { useBinanceData } from "@/hooks/useBinanceData";
+import { usePortfolio } from "@/hooks/usePortfolio";
+import { formatPrice, formatPct, formatLargeNumber, timeAgo } from "@/lib/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  CartesianGrid,
+  Legend,
+} from "recharts";
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Clock,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
+  CheckCircle,
+  AlertTriangle,
+  RefreshCw,
+  BarChart2,
+  Zap,
+} from "lucide-react";
+import { Link } from "wouter";
+
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+const ASSET_COLORS: Record<string, string> = {
+  BTC: "oklch(0.78 0.18 75)",
+  ETH: "oklch(0.65 0.18 255)",
+  SOL: "oklch(0.72 0.18 155)",
+  SUI: "oklch(0.70 0.20 200)",
+  DOGE: "oklch(0.82 0.18 95)",
+  CASH: "oklch(0.55 0.010 260)",
+};
+
+const ASSET_ICONS: Record<string, string> = {
+  BTC: "₿", ETH: "Ξ", SOL: "◎", SUI: "🌊", DOGE: "Ð", CASH: "$",
+};
+
+function pnlClass(v: number) {
+  if (v > 0) return "text-emerald-400";
+  if (v < 0) return "text-red-400";
+  return "text-muted-foreground";
+}
+
+function PnlArrow({ v }: { v: number }) {
+  if (v > 0) return <ArrowUpRight size={16} className="text-emerald-400" />;
+  if (v < 0) return <ArrowDownRight size={16} className="text-red-400" />;
+  return <Minus size={16} className="text-muted-foreground" />;
+}
+
+function StatCard({
+  label,
+  value,
+  sub,
+  color,
+  icon,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  color?: string;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="panel p-4 flex flex-col gap-1"
+      style={{ borderColor: color ? `${color}25` : undefined }}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        {icon && <span className="opacity-50">{icon}</span>}
+      </div>
+      <p
+        className="text-2xl font-bold mono-data"
+        style={{ fontFamily: "Syne, sans-serif", color: color ?? "white" }}
+      >
+        {value}
+      </p>
+      {sub && <p className="text-xs text-muted-foreground/60 mono-data">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Custom tooltip for equity chart ───────────────────────────────────────────
+function EquityTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const strat = payload.find((p: any) => p.dataKey === "value");
+  const btc = payload.find((p: any) => p.dataKey === "btcHoldValue");
+  return (
+    <div
+      className="rounded-lg border p-3 text-xs space-y-1"
+      style={{ background: "oklch(0.13 0.012 260)", borderColor: "oklch(1 0 0 / 12%)" }}
+    >
+      <p className="text-muted-foreground font-semibold mb-2">{label}</p>
+      {strat && (
+        <div className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full inline-block" style={{ background: "oklch(0.72 0.18 155)" }} />
+            Strategy
+          </span>
+          <span className="font-bold text-emerald-300 mono-data">{formatLargeNumber(strat.value)}</span>
+        </div>
+      )}
+      {btc && (
+        <div className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full inline-block" style={{ background: "oklch(0.78 0.18 75)" }} />
+            BTC Hold
+          </span>
+          <span className="font-bold text-amber-300 mono-data">{formatLargeNumber(btc.value)}</span>
+        </div>
+      )}
+      {strat && btc && (
+        <div className="flex items-center justify-between gap-4 border-t border-border/20 pt-1 mt-1">
+          <span className="text-muted-foreground/60">Outperformance</span>
+          <span className={`font-bold mono-data ${strat.value >= btc.value ? "text-emerald-400" : "text-red-400"}`}>
+            {strat.value >= btc.value ? "+" : ""}{formatLargeNumber(strat.value - btc.value)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────────
+export default function Portfolio() {
+  const { signal, loading: dataLoading, lastUpdated, rawData } = useBinanceData(5 * 60 * 1000);
+  const portfolio = usePortfolio(signal, rawData);
+
+  const loading = dataLoading || portfolio.loading;
+
+  // Next execution countdown
+  const nextExec = portfolio.nextActionDate ? new Date(portfolio.nextActionDate) : null;
+  const hoursToNext = nextExec
+    ? Math.max(0, Math.floor((nextExec.getTime() - Date.now()) / (1000 * 60 * 60)))
+    : null;
+  const minsToNext = nextExec
+    ? Math.max(0, Math.floor(((nextExec.getTime() - Date.now()) % (1000 * 60 * 60)) / (1000 * 60)))
+    : null;
+
+  const assetColor = ASSET_COLORS[portfolio.currentAsset] ?? "oklch(0.55 0.010 260)";
+
+  return (
+    <div className="min-h-screen" style={{ background: "oklch(0.10 0.010 260)" }}>
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-50 border-b border-border/30"
+        style={{ background: "oklch(0.13 0.012 260 / 95%)", backdropFilter: "blur(12px)" }}
+      >
+        <div className="container flex items-center justify-between h-16">
+          <div className="flex items-center gap-4">
+            {/* Back to dashboard */}
+            <Link href="/">
+              <div className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <span className="text-xs">←</span>
+                <span className="text-xs">Dashboard</span>
+              </div>
+            </Link>
+            <div className="w-px h-5 bg-border/40" />
+            <div className="flex items-center gap-2.5">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: "oklch(0.72 0.18 155 / 15%)", border: "1px solid oklch(0.72 0.18 155 / 25%)" }}
+              >
+                <TrendingUp size={16} style={{ color: "oklch(0.72 0.18 155)" }} />
+              </div>
+              <div>
+                <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+                  My Portfolio
+                </h1>
+                <p className="text-xs text-muted-foreground">$50,000 starting capital · Live simulation</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {lastUpdated && (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
+                <RefreshCw size={11} className={dataLoading ? "animate-spin" : ""} />
+                <span>{timeAgo(lastUpdated)}</span>
+              </div>
+            )}
+            {/* Current position pill */}
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-bold"
+              style={{
+                background: `${assetColor}12`,
+                borderColor: `${assetColor}30`,
+                color: assetColor,
+                fontFamily: "Syne, sans-serif",
+              }}
+            >
+              <span>{ASSET_ICONS[portfolio.currentAsset] ?? portfolio.currentAsset}</span>
+              <span>{portfolio.currentAsset}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab bar */}
+        <div className="container flex items-center gap-1 pb-0 pt-0 border-t border-border/20">
+          <Link href="/">
+            <div className="px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
+              Strategy Dashboard
+            </div>
+          </Link>
+          <div
+            className="px-4 py-2.5 text-xs font-semibold border-b-2 cursor-default"
+            style={{ color: "oklch(0.72 0.18 155)", borderColor: "oklch(0.72 0.18 155)" }}
+          >
+            My Portfolio
+          </div>
+        </div>
+      </header>
+
+      <div className="container py-6 space-y-6">
+
+        {/* ── ROW 1: Key stats ─────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
+          ) : (
+            <>
+              <StatCard
+                label="Portfolio Value"
+                value={formatLargeNumber(portfolio.currentValue)}
+                sub={`Started: ${formatLargeNumber(portfolio.startingCapital)}`}
+                color="oklch(0.72 0.18 155)"
+                icon={<DollarSign size={14} />}
+              />
+              <StatCard
+                label="Total P&L"
+                value={`${portfolio.totalPnlUsd >= 0 ? "+" : ""}${formatLargeNumber(portfolio.totalPnlUsd)}`}
+                sub={`${formatPct(portfolio.totalPnlPct)} since start`}
+                color={portfolio.totalPnlUsd >= 0 ? "oklch(0.72 0.18 155)" : "oklch(0.62 0.22 25)"}
+                icon={<PnlArrow v={portfolio.totalPnlUsd} />}
+              />
+              <StatCard
+                label="vs BTC Buy & Hold"
+                value={`${portfolio.outperformanceUsd >= 0 ? "+" : ""}${formatLargeNumber(portfolio.outperformanceUsd)}`}
+                sub={`BTC hold: ${formatLargeNumber(portfolio.btcHoldValue)}`}
+                color={portfolio.outperformanceUsd >= 0 ? "oklch(0.72 0.18 155)" : "oklch(0.62 0.22 25)"}
+                icon={<BarChart2 size={14} />}
+              />
+              <StatCard
+                label="Next Execution"
+                value={hoursToNext !== null ? `${hoursToNext}h ${minsToNext}m` : "—"}
+                sub="Daily close → 00:30 UTC"
+                color="oklch(0.60 0.22 255)"
+                icon={<Clock size={14} />}
+              />
+            </>
+          )}
+        </div>
+
+        {/* ── ROW 2: Equity curve ──────────────────────────────────────────── */}
+        <div className="panel p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={14} className="text-emerald-400 opacity-70" />
+              <div>
+                <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "Syne, sans-serif" }}>
+                  Equity Curve
+                </h2>
+                <p className="text-xs text-muted-foreground">Strategy vs BTC buy-and-hold · $50,000 starting capital</p>
+              </div>
+            </div>
+            {!loading && portfolio.equityCurve.length > 0 && (
+              <div className="flex items-center gap-4 text-xs text-muted-foreground/60">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-0.5 inline-block rounded" style={{ background: "oklch(0.72 0.18 155)" }} />
+                  Strategy
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-0.5 inline-block rounded" style={{ background: "oklch(0.78 0.18 75)" }} />
+                  BTC Hold
+                </span>
+              </div>
+            )}
+          </div>
+
+          {loading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : portfolio.equityCurve.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">
+              Insufficient data to render equity curve
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart
+                data={portfolio.equityCurve.map((p) => ({
+                  ...p,
+                  date: p.date.slice(5), // MM-DD
+                }))}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient id="stratGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="oklch(0.72 0.18 155)" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="oklch(0.72 0.18 155)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="btcGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="oklch(0.78 0.18 75)" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="oklch(0.78 0.18 75)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 5%)" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: "oklch(0.55 0.010 260)", fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval={Math.floor(portfolio.equityCurve.length / 8)}
+                />
+                <YAxis
+                  domain={["auto", "auto"]}
+                  tick={{ fill: "oklch(0.55 0.010 260)", fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={64}
+                  tickFormatter={(v) => formatLargeNumber(v)}
+                />
+                <ReferenceLine
+                  y={50000}
+                  stroke="oklch(1 0 0 / 20%)"
+                  strokeDasharray="4 2"
+                  label={{ value: "$50k", position: "insideTopLeft", fill: "oklch(0.55 0.010 260)", fontSize: 10 }}
+                />
+                <Tooltip content={<EquityTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="btcHoldValue"
+                  stroke="oklch(0.78 0.18 75)"
+                  strokeWidth={1.5}
+                  fill="url(#btcGrad)"
+                  strokeOpacity={0.7}
+                  dot={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="oklch(0.72 0.18 155)"
+                  strokeWidth={2}
+                  fill="url(#stratGrad)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: "oklch(0.72 0.18 155)" }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* ── ROW 3: Position + Signal ─────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+          {/* Current Position */}
+          <div
+            className="panel p-5"
+            style={{ borderColor: `${assetColor}20` }}
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <span style={{ color: assetColor, opacity: 0.7 }}><DollarSign size={14} /></span>
+              <h2 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground" style={{ fontFamily: "Geist, sans-serif" }}>
+                Current Position
+              </h2>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-12 w-40" />
+                <Skeleton className="h-4 w-full" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Asset badge */}
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl font-bold"
+                    style={{ background: `${assetColor}15`, border: `1px solid ${assetColor}30`, color: assetColor }}
+                  >
+                    {ASSET_ICONS[portfolio.currentAsset] ?? portfolio.currentAsset[0]}
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+                      {portfolio.currentAsset === "CASH" ? "CASH" : portfolio.currentAsset}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {portfolio.currentAsset === "CASH"
+                        ? "Fully in cash — awaiting re-entry signal"
+                        : `${portfolio.currentUnits.toFixed(6)} units @ ${formatPrice(portfolio.entryPrice)}`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Value breakdown */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg" style={{ background: "oklch(1 0 0 / 4%)" }}>
+                    <p className="text-xs text-muted-foreground mb-1">Invested Value</p>
+                    <p className="text-base font-bold mono-data text-white">{formatLargeNumber(portfolio.investedValue)}</p>
+                  </div>
+                  <div className="p-3 rounded-lg" style={{ background: "oklch(1 0 0 / 4%)" }}>
+                    <p className="text-xs text-muted-foreground mb-1">Cash Balance</p>
+                    <p className="text-base font-bold mono-data text-white">{formatLargeNumber(portfolio.cashBalance)}</p>
+                  </div>
+                </div>
+
+                {/* Unrealised P&L */}
+                {portfolio.currentAsset !== "CASH" && (
+                  <div className="flex items-center justify-between p-3 rounded-lg border" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-0.5">Unrealised P&L</p>
+                      <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlUsd)}`}>
+                        {portfolio.unrealisedPnlUsd >= 0 ? "+" : ""}{formatLargeNumber(portfolio.unrealisedPnlUsd)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground mb-0.5">Return</p>
+                      <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlPct)}`}>
+                        {formatPct(portfolio.unrealisedPnlPct)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Entry info */}
+                {portfolio.currentAsset !== "CASH" && portfolio.entryDate && (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Entry Date</span>
+                      <span className="mono-data text-foreground/80">{portfolio.entryDate}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Days Held</span>
+                      <span className="mono-data text-foreground/80">{portfolio.daysHeld} days</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Min-Hold Remaining</span>
+                      <span className={`mono-data font-semibold ${portfolio.minHoldDaysRemaining === 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                        {portfolio.minHoldDaysRemaining === 0 ? "✓ Free to rotate" : `${portfolio.minHoldDaysRemaining} days`}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Today's Signal & Next Action */}
+          <div className="panel p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Zap size={14} className="text-primary opacity-70" />
+              <h2 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground" style={{ fontFamily: "Geist, sans-serif" }}>
+                Today's Signal & Next Action
+              </h2>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            ) : signal ? (
+              <div className="space-y-4">
+                {/* Signal */}
+                <div
+                  className="p-4 rounded-xl border"
+                  style={{
+                    background: signal.action === "HOLD" ? "oklch(0.60 0.22 255 / 8%)" : signal.action === "BUY" ? "oklch(0.72 0.18 155 / 8%)" : "oklch(0.62 0.22 25 / 8%)",
+                    borderColor: signal.action === "HOLD" ? "oklch(0.60 0.22 255 / 25%)" : signal.action === "BUY" ? "oklch(0.72 0.18 155 / 25%)" : "oklch(0.62 0.22 25 / 25%)",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-muted-foreground">Strategy Signal</p>
+                    <span
+                      className="text-sm font-bold px-3 py-1 rounded-lg"
+                      style={{
+                        fontFamily: "Syne, sans-serif",
+                        background: signal.action === "HOLD" ? "oklch(0.60 0.22 255 / 15%)" : signal.action === "BUY" ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.62 0.22 25 / 15%)",
+                        color: signal.action === "HOLD" ? "oklch(0.75 0.22 255)" : signal.action === "BUY" ? "oklch(0.72 0.18 155)" : "oklch(0.72 0.22 25)",
+                      }}
+                    >
+                      {signal.action}
+                    </span>
+                  </div>
+                  <p className="text-sm text-foreground/80">{signal.reason}</p>
+                </div>
+
+                {/* What this means for my portfolio */}
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">What this means for you</p>
+                  <div className="p-3 rounded-lg border border-border/30" style={{ background: "oklch(1 0 0 / 3%)" }}>
+                    {signal.action === "HOLD" && portfolio.currentAsset === "CASH" && (
+                      <div className="flex items-start gap-2">
+                        <CheckCircle size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+                        <p className="text-sm text-foreground/80">
+                          Stay in cash. No action required at 00:30 UTC.
+                        </p>
+                      </div>
+                    )}
+                    {signal.action === "HOLD" && portfolio.currentAsset !== "CASH" && (
+                      <div className="flex items-start gap-2">
+                        <CheckCircle size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+                        <p className="text-sm text-foreground/80">
+                          Hold your {portfolio.currentAsset} position.
+                          {portfolio.minHoldDaysRemaining > 0 && ` Min-hold: ${portfolio.minHoldDaysRemaining} days remaining.`}
+                        </p>
+                      </div>
+                    )}
+                    {signal.action === "BUY" && portfolio.currentAsset === "CASH" && (
+                      <div className="flex items-start gap-2">
+                        <ArrowUpRight size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+                        <p className="text-sm text-foreground/80">
+                          <span className="font-semibold text-emerald-300">Buy signal.</span> At 00:30 UTC, deploy{" "}
+                          <span className="font-semibold mono-data text-white">
+                            {formatLargeNumber(portfolio.cashBalance * (signal.allocationMultiplier ?? 1))}
+                          </span>{" "}
+                          into {Object.keys(signal.targetPositions).join(", ") || "BTC"}.
+                        </p>
+                      </div>
+                    )}
+                    {signal.action === "BUY" && portfolio.currentAsset !== "CASH" && (
+                      <div className="flex items-start gap-2">
+                        <CheckCircle size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+                        <p className="text-sm text-foreground/80">
+                          Already invested. Hold current {portfolio.currentAsset} position.
+                        </p>
+                      </div>
+                    )}
+                    {signal.action === "SELL_ALL" && (
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle size={14} className="text-red-400 mt-0.5 shrink-0" />
+                        <p className="text-sm text-foreground/80">
+                          <span className="font-semibold text-red-300">Cash trigger hit.</span> At 00:30 UTC, sell all positions and move to 100% cash.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Next execution */}
+                <div className="flex items-center justify-between p-3 rounded-lg border border-border/30" style={{ background: "oklch(1 0 0 / 3%)" }}>
+                  <div className="flex items-center gap-2">
+                    <Clock size={13} className="text-primary opacity-70" />
+                    <span className="text-xs text-muted-foreground">Next execution window</span>
+                  </div>
+                  <span className="text-sm font-bold mono-data" style={{ color: "oklch(0.60 0.22 255)", fontFamily: "Syne, sans-serif" }}>
+                    {hoursToNext !== null ? `${hoursToNext}h ${minsToNext}m` : "—"} · 00:30 UTC
+                  </span>
+                </div>
+
+                {/* Allocation breakdown */}
+                {Object.keys(signal.targetPositions).length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Target Allocation</p>
+                    <div className="space-y-1.5">
+                      {Object.entries(signal.targetPositions).map(([asset, alloc]) => (
+                        <div key={asset} className="flex items-center justify-between text-sm">
+                          <span className="flex items-center gap-2">
+                            <span style={{ color: ASSET_COLORS[asset] }}>{ASSET_ICONS[asset]}</span>
+                            <span className="text-foreground/80">{asset}</span>
+                          </span>
+                          <span className="font-bold mono-data" style={{ color: ASSET_COLORS[asset] }}>
+                            {formatLargeNumber(portfolio.currentValue * (alloc ?? 0))}
+                            <span className="text-muted-foreground/60 font-normal ml-1">({((alloc ?? 0) * 100).toFixed(0)}%)</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* ── ROW 4: Trade Log ─────────────────────────────────────────────── */}
+        <div className="panel p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart2 size={14} className="text-primary opacity-70" />
+            <h2 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground" style={{ fontFamily: "Geist, sans-serif" }}>
+              Trade Log
+            </h2>
+            {!loading && (
+              <span className="text-xs text-muted-foreground/50 ml-auto">
+                {portfolio.tradeLog.length} trade{portfolio.tradeLog.length !== 1 ? "s" : ""} in simulation window
+              </span>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : portfolio.tradeLog.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">
+              <p>No trades executed yet in the simulation window.</p>
+              <p className="text-xs mt-1 text-muted-foreground/50">The strategy is currently holding cash — waiting for a positive momentum signal.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/20">
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Date</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Action</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Asset</th>
+                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Price</th>
+                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Value</th>
+                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Portfolio After</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...portfolio.tradeLog].reverse().map((trade, i) => (
+                    <tr key={i} className="border-b border-border/10 hover:bg-white/2 transition-colors">
+                      <td className="py-2.5 pr-4 mono-data text-muted-foreground/70">{trade.date}</td>
+                      <td className="py-2.5 pr-4">
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-bold"
+                          style={{
+                            background: trade.action === "BUY" ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.62 0.22 25 / 15%)",
+                            color: trade.action === "BUY" ? "oklch(0.72 0.18 155)" : "oklch(0.72 0.22 25)",
+                          }}
+                        >
+                          {trade.action}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span className="flex items-center gap-1.5">
+                          <span style={{ color: ASSET_COLORS[trade.asset] }}>{ASSET_ICONS[trade.asset]}</span>
+                          <span className="font-semibold text-foreground/80">{trade.asset}</span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right mono-data text-foreground/70">{formatPrice(trade.price)}</td>
+                      <td className="py-2.5 pr-4 text-right mono-data text-foreground/80 font-semibold">{formatLargeNumber(trade.valueUsd)}</td>
+                      <td className="py-2.5 pr-4 text-right mono-data font-bold" style={{ color: "oklch(0.72 0.18 155)" }}>
+                        {formatLargeNumber(trade.portfolioValueAfter)}
+                      </td>
+                      <td className="py-2.5 text-muted-foreground/60 max-w-xs truncate">{trade.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* ── Footer ───────────────────────────────────────────────────────── */}
+        <footer className="border-t border-border/20 pt-4 pb-6">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/40">
+            <p>The Financial Revolution · Portfolio simulation based on live Binance data · Not financial advice</p>
+            <p className="mono-data">Execution assumed at 00:30 UTC daily · Simulation window: last 60 days</p>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}

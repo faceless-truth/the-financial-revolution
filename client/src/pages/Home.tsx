@@ -17,6 +17,7 @@ import {
   timeAgo,
 } from "@/lib/formatters";
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
 import { RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, Clock, Zap, Target, BarChart2, Activity } from "lucide-react";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/dashboard-hero-bg-hgsqEWzXFhZWuFZbadExQL.webp";
@@ -250,6 +251,23 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
+      <div className="border-b border-border/20" style={{ background: "oklch(0.13 0.012 260 / 95%)" }}>
+        <div className="container flex items-center gap-1">
+          <div
+            className="px-4 py-2.5 text-xs font-semibold border-b-2 cursor-default"
+            style={{ color: "oklch(0.60 0.22 255)", borderColor: "oklch(0.60 0.22 255)" }}
+          >
+            Strategy Dashboard
+          </div>
+          <Link href="/portfolio">
+            <div className="px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors border-b-2 border-transparent">
+              My Portfolio
+            </div>
+          </Link>
+        </div>
+      </div>
 
       <div className="container py-6 space-y-6">
 
