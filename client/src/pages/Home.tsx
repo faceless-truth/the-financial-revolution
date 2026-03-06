@@ -1,5 +1,5 @@
 /**
- * TREND_CONFIRM v7.0 — Strategy Dashboard
+ * The Financial Revolution — Strategy Dashboard
  * Design: Dark Precision — deep navy panels, luminous data, colour-coded signals
  * Fonts: Syne (display/numbers) + Geist (labels) + JetBrains Mono (data)
  */
@@ -218,7 +218,7 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-lg font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>
-                  TREND_CONFIRM <span className="text-primary opacity-80">v7.0</span>
+                  The Financial <span className="text-primary opacity-80">Revolution</span>
                 </h1>
                 <p className="text-xs text-muted-foreground">Conservative Momentum Strategy · Live Binance Data</p>
               </div>
@@ -826,7 +826,7 @@ export default function Home() {
         {/* ── FOOTER ─────────────────────────────────────────────────────────── */}
         <footer className="border-t border-border/20 pt-4 pb-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/50">
-            <p>TREND_CONFIRM v7.0 · Conservative Parameters · TFR Investing Engine</p>
+            <p>The Financial Revolution · Conservative Parameters · TFR Investing Engine</p>
             <p className="mono-data">
               {lastUpdated ? `Last updated: ${lastUpdated.toLocaleTimeString()}` : "Fetching live data..."}
               {" · "}Refreshes every 5 min
