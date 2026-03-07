@@ -3,7 +3,7 @@
  * ================================================
  * Mirrors unified_momentum_strategy.py exactly:
  *
- * - 14-day pairwise momentum scoring (winners/losers) + directional vol ratio
+ * - 30-day pairwise momentum scoring (winners/losers) + directional vol ratio
  * - 5-regime market regime: STRONG_INVEST / INVEST / NEUTRAL / CASH / STRONG_CASH
  * - Confidence Score v3: F&G 55% + STH Proxy (BTC/90d MA) 45%
  * - Leverage gate: confidence_v3 >= 0.68 AND BTC > 200d MA → 2x
@@ -36,7 +36,7 @@ export const PER_ASSET_CAPS: Record<Asset, number> = {
   DOGE: 0.6,
 };
 
-const MOMENTUM_PERIOD = 14;
+const MOMENTUM_PERIOD = 30;
 const VOLATILITY_WINDOW = 14;
 export const MIN_SCORE = 10.0;
 export const SECOND_BEST_MIN_SCORE = 3.0;
@@ -73,7 +73,7 @@ export interface Candle {
 export interface AssetMetrics {
   symbol: Asset;
   price: number;
-  momentum14: number;
+  momentum30: number;
   momentum5: number;
   pairwiseScore: number;
   riskAdjScore: number;
@@ -173,14 +173,14 @@ function calcDirectionalVol(candles: Candle[], window: number) {
   return { total, upside, downside, ratio };
 }
 
-function calcPairwiseScores(momentum14: Partial<Record<Asset, number>>): Partial<Record<Asset, number>> {
-  const assets = MAJORS.filter(a => momentum14[a] !== undefined);
+function calcPairwiseScores(momentum30: Partial<Record<Asset, number>>): Partial<Record<Asset, number>> {
+  const assets = MAJORS.filter(a => momentum30[a] !== undefined);
   const scores: Partial<Record<Asset, number>> = {};
   assets.forEach(a => { scores[a] = 0; });
   for (let i = 0; i < assets.length; i++) {
     for (let j = i + 1; j < assets.length; j++) {
       const a = assets[i], b = assets[j];
-      const ma = momentum14[a] ?? 0, mb = momentum14[b] ?? 0;
+      const ma = momentum30[a] ?? 0, mb = momentum30[b] ?? 0;
       if (ma > mb) { scores[a] = (scores[a] ?? 0) + 1; scores[b] = (scores[b] ?? 0) - 1; }
       else if (mb > ma) { scores[b] = (scores[b] ?? 0) + 1; scores[a] = (scores[a] ?? 0) - 1; }
     }
@@ -262,13 +262,13 @@ function buildSignal(
   ranked: Array<{ symbol: Asset; riskAdjScore: number }>,
   regime: MarketRegime,
   confidence: ConfidenceV3,
-  momentum14: Partial<Record<Asset, number>>
+  momentum30: Partial<Record<Asset, number>>
 ): StrategySignal {
   const baseAlloc = regime.allocation;
   const threshold = regime.entryThreshold;
   const leverage = confidence.leverageFiring ? LEVERAGE_MULTIPLIER : 1.0;
   const leverageReason = confidence.leverageReason;
-  const momentumScores = momentum14 as Partial<Record<Asset, number>>;
+  const momentumScores = momentum30 as Partial<Record<Asset, number>>;
   const momentumRanked = [...ranked].map(r => ({ asset: r.symbol, score: r.riskAdjScore }));
 
   if (baseAlloc === 0) {
@@ -284,7 +284,7 @@ function buildSignal(
   const secondBestScore = second?.riskAdjScore ?? 0;
 
   if (top.riskAdjScore < threshold) {
-    if (regime.regime === "NEUTRAL" && second && secondBestScore >= SECOND_BEST_MIN_SCORE && (momentum14[second.symbol] ?? 0) > 0) {
+    if (regime.regime === "NEUTRAL" && second && secondBestScore >= SECOND_BEST_MIN_SCORE && (momentum30[second.symbol] ?? 0) > 0) {
       const cap = PER_ASSET_CAPS[second.symbol];
       const alloc = Math.min(baseAlloc * 0.8, cap);
       return { action: "BUY", targetPositions: { [second.symbol]: alloc } as Partial<Record<Asset, number>>, allocationMode: "REMAINDER_SINGLE", reason: `${second.symbol} qualifies as second-best (${secondBestScore.toFixed(1)}) in NEUTRAL (threshold: ${SECOND_BEST_MIN_SCORE})`, leverage, leverageReason, entryThreshold: threshold, topAsset: second.symbol, secondBestScore, positionType: "second", allocationMultiplier: alloc, momentumScores, momentumRanked };
@@ -366,7 +366,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
       candleResults.forEach(({ symbol, candles }) => { candleMap[symbol as Asset] = candles; });
 
       // Per-asset metrics
-      const momentum14: Partial<Record<Asset, number>> = {};
+      const momentum30: Partial<Record<Asset, number>> = {};
       const assetMetrics: Partial<Record<Asset, AssetMetrics>> = {};
 
       for (const symbol of MAJORS) {
@@ -374,7 +374,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         if (!candles || candles.length < MOMENTUM_PERIOD + 1) continue;
         const latest = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
-        const mom14 = calcMomentum(candles, MOMENTUM_PERIOD);
+        const mom30 = calcMomentum(candles, MOMENTUM_PERIOD);
         const mom5 = calcMomentum(candles, 5);
         const vol = calcDirectionalVol(candles, VOLATILITY_WINDOW);
         const ma200 = calcMA(candles, Math.min(200, candles.length));
@@ -383,12 +383,12 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         const drawdown = ((latest.close - high30) / high30) * 100;
         const change24h = ((latest.close - prev.close) / prev.close) * 100;
         const nearHigh30 = (high30 - latest.close) / high30 <= 0.05;
-        momentum14[symbol] = mom14;
-        assetMetrics[symbol] = { symbol, price: latest.close, momentum14: mom14, momentum5: mom5, pairwiseScore: 0, riskAdjScore: 0, volRatio: vol.ratio, upsideVol: vol.upside, downsideVol: vol.downside, totalVol: vol.total, drawdownFromHigh30: drawdown, change24h, ma200, ma90, nearHigh30 };
+        momentum30[symbol] = mom30;
+        assetMetrics[symbol] = { symbol, price: latest.close, momentum30: mom30, momentum5: mom5, pairwiseScore: 0, riskAdjScore: 0, volRatio: vol.ratio, upsideVol: vol.upside, downsideVol: vol.downside, totalVol: vol.total, drawdownFromHigh30: drawdown, change24h, ma200, ma90, nearHigh30 };
       }
 
       // Pairwise + risk-adjusted scores
-      const pairwise = calcPairwiseScores(momentum14);
+      const pairwise = calcPairwiseScores(momentum30);
       for (const symbol of MAJORS) {
         if (!assetMetrics[symbol]) continue;
         const raw = pairwise[symbol] ?? 0;
@@ -406,7 +406,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         .map((a, i) => ({ ...a, rank: i + 1 }));
 
       // Regime
-      const regime = deriveRegime(candleMap["BTC"] ?? [], momentum14);
+      const regime = deriveRegime(candleMap["BTC"] ?? [], momentum30);
 
       // Confidence v3
       const btcCandles = candleMap["BTC"] ?? [];
@@ -425,7 +425,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
       const confidence: ConfidenceV3 = { score: confScore, zone: confidenceZone(confScore), fngValue: fng.current, fng30dAvg: fng.avg30d, sthRatio, btcAbove200, leverageFiring, leverageReason };
 
       // Signal
-      const signal = buildSignal(ranked, regime, confidence, momentum14);
+      const signal = buildSignal(ranked, regime, confidence, momentum30);
 
       setResult({ signal, assets: assetMetrics, rankedAssets: ranked, regime, confidence, rawData: candleMap, loading: false, error: null, lastUpdated: new Date() });
     } catch (err: any) {

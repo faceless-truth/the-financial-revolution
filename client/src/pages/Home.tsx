@@ -2,7 +2,7 @@
  * The Financial Revolution — Strategy Dashboard
  * Design: Dark Precision — deep navy panels, luminous data, colour-coded signals
  * Fonts: Syne (display/numbers) + Geist (labels) + JetBrains Mono (data)
- * Strategy: Unified Momentum v7.0 — 14-day pairwise, 5-regime, Confidence v3, Leverage Gate
+ * Strategy: Unified Momentum v7.0 — 30-day pairwise, 5-regime, Confidence v3, Leverage Gate
  */
 
 import { useBinanceData, type Candle, type RegimeType, MAJORS, PER_ASSET_CAPS, LEVERAGE_CONFIDENCE_THRESHOLD, ADAPTIVE_THRESHOLDS, REGIME_ALLOCATION } from "@/hooks/useBinanceData";
@@ -165,16 +165,16 @@ export default function Home() {
   const btcHigh30 = btcCandles.length >= 30 ? Math.max(...btcCandles.slice(-30).map(c => c.high)) : 0;
   const btcDrawdownPct = btcHigh30 > 0 ? ((btcPrice - btcHigh30) / btcHigh30) * 100 : 0; // negative = below high
 
-  // Re-entry: BTC price needed to make 14-day momentum positive
-  const btc14dAgo = btcCandles.length >= 15 ? btcCandles[btcCandles.length - 15].close : 0;
-  const reentryMet = btc14dAgo > 0 && btcPrice > btc14dAgo;
-  const reentryGapUsd = btc14dAgo - btcPrice;
-  const reentryGapPct = btc14dAgo > 0 ? ((btcPrice / btc14dAgo) - 1) * 100 : 0;
+  // Re-entry: BTC price needed to make 30-day momentum positive
+  const btc30dAgo = btcCandles.length >= 31 ? btcCandles[btcCandles.length - 31].close : 0;
+  const reentryMet = btc30dAgo > 0 && btcPrice > btc30dAgo;
+  const reentryGapUsd = btc30dAgo - btcPrice;
+  const reentryGapPct = btc30dAgo > 0 ? ((btcPrice / btc30dAgo) - 1) * 100 : 0;
 
   // Rolling re-entry thresholds (next 7 days)
-  const rollingReentry = btcCandles.length >= 22
+  const rollingReentry = btcCandles.length >= 31
     ? Array.from({ length: 7 }, (_, i) => {
-        const idx = btcCandles.length - 14 + i; // candle that will be 14d ago in i days
+        const idx = btcCandles.length - 30 + i; // candle that will be 30d ago in i days
         if (idx < 0 || idx >= btcCandles.length) return null;
         const tp = btcCandles[idx].close;
         return { day: i + 1, triggerPrice: tp, gapPct: ((btcPrice / tp) - 1) * 100 };
@@ -313,7 +313,7 @@ export default function Home() {
 
           {/* RE-ENTRY TRIGGER */}
           <div className="panel p-5 flex flex-col gap-4">
-            <SectionHeader icon={<Target size={14} />} title="Re-Entry Trigger" subtitle="BTC 14-day momentum flip — when to re-enter from cash" />
+            <SectionHeader icon={<Target size={14} />} title="Re-Entry Trigger" subtitle="BTC 30-day momentum flip — when to re-enter from cash" />
             {loading && !signal ? (
               <div className="space-y-3"><Skeleton className="h-8 w-40" /><Skeleton className="h-4 w-full" /><Skeleton className="h-32 w-full" /></div>
             ) : (
@@ -322,7 +322,7 @@ export default function Home() {
                 <div className={`p-4 rounded-lg border ${reentryMet ? "border-emerald-500/30 bg-emerald-500/8" : "border-primary/20 bg-primary/5"}`}>
                   <p className="text-xs text-muted-foreground mb-1">14-Day Ago BTC Price (momentum pivot)</p>
                   <AnimatedNumber
-                    value={formatPrice(btc14dAgo)}
+                    value={formatPrice(btc30dAgo)}
                     className="text-2xl font-bold text-white data-number"
                   />
                   <div className="flex items-center gap-2 mt-2">
@@ -335,7 +335,7 @@ export default function Home() {
                 </div>
 
                 {/* Gap */}
-                {!reentryMet && btc14dAgo > 0 && (
+                {!reentryMet && btc30dAgo > 0 && (
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
                       <p className="text-xs text-muted-foreground mb-1">Gap to Re-Entry</p>
@@ -578,7 +578,7 @@ export default function Home() {
                       </div>
                       {m && (
                         <div className="flex items-center gap-4 mt-2 pl-11">
-                          <span className="text-xs text-muted-foreground/60 mono-data">14d: <span className={momentumClass(m.momentum14)}>{formatPct(m.momentum14)}</span></span>
+                          <span className="text-xs text-muted-foreground/60 mono-data">30d: <span className={momentumClass(m.momentum30)}>{formatPct(m.momentum30)}</span></span>
                           <span className="text-xs text-muted-foreground/60 mono-data">Vol↑/↓: <span className="text-foreground/60">{m.volRatio.toFixed(2)}</span></span>
                           <span className="text-xs text-muted-foreground/60 mono-data">DD: <span className={drawdownClass(m.drawdownFromHigh30)}>{formatPct(m.drawdownFromHigh30, false)}</span></span>
                           <span className={`text-xs mono-data ${m.change24h >= 0 ? "text-emerald-400/70" : "text-red-400/70"}`}>24h: {formatPct(m.change24h)}</span>
@@ -686,14 +686,14 @@ export default function Home() {
                 <XAxis dataKey="date" tick={{ fill: "oklch(0.55 0.010 260)", fontSize: 10 }} tickLine={false} axisLine={false} interval={4} />
                 <YAxis domain={["auto", "auto"]} tick={{ fill: "oklch(0.55 0.010 260)", fontSize: 10 }} tickLine={false} axisLine={false} width={60} tickFormatter={v => formatPrice(v)} />
                 {btcHigh30 > 0 && <ReferenceLine y={btcHigh30} stroke="oklch(0.78 0.18 75)" strokeDasharray="4 2" strokeOpacity={0.6} />}
-                {btc14dAgo > 0 && !reentryMet && <ReferenceLine y={btc14dAgo} stroke="oklch(0.60 0.22 255)" strokeDasharray="3 3" strokeOpacity={0.5} />}
+                {btc30dAgo > 0 && !reentryMet && <ReferenceLine y={btc30dAgo} stroke="oklch(0.60 0.22 255)" strokeDasharray="3 3" strokeOpacity={0.5} />}
                 <Line type="monotone" dataKey="price" stroke="oklch(0.78 0.18 75)" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "oklch(0.78 0.18 75)" }} />
                 <Tooltip contentStyle={{ background: "oklch(0.13 0.012 260)", border: "1px solid oklch(1 0 0 / 10%)", borderRadius: 6, fontSize: 11 }} formatter={(v: number) => [formatPrice(v), "BTC Close"]} />
               </LineChart>
             </ResponsiveContainer>
             <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground/60">
               <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.78 0.18 75 / 60%)", borderTop: "1px dashed" }} /> 30d High: <span className="text-amber-300 font-semibold mono-data">{formatPrice(btcHigh30)}</span></span>
-              {!reentryMet && btc14dAgo > 0 && <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.60 0.22 255 / 50%)", borderTop: "1px dashed" }} /> Re-entry: <span className="text-primary/80 mono-data">{formatPrice(btc14dAgo)}</span></span>}
+              {!reentryMet && btc30dAgo > 0 && <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.60 0.22 255 / 50%)", borderTop: "1px dashed" }} /> Re-entry: <span className="text-primary/80 mono-data">{formatPrice(btc30dAgo)}</span></span>}
             </div>
           </div>
         )}
@@ -734,8 +734,8 @@ export default function Home() {
                         <p className={`text-xs mono-data ${m.change24h >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatPct(m.change24h)} 24h</p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">14d Momentum</p>
-                        <p className={`text-lg font-bold mono-data ${momentumClass(m.momentum14)}`} style={{ fontFamily: "Syne, sans-serif" }}>{formatPct(m.momentum14)}</p>
+                        <p className="text-xs text-muted-foreground">30d Momentum</p>
+                        <p className={`text-lg font-bold mono-data ${momentumClass(m.momentum30)}`} style={{ fontFamily: "Syne, sans-serif" }}>{formatPct(m.momentum30)}</p>
                         <p className="text-xs text-muted-foreground/50 mono-data">score: {ranked?.riskAdjScore.toFixed(1) ?? "—"}</p>
                       </div>
                       <div>
@@ -776,7 +776,7 @@ export default function Home() {
             </p>
           </div>
           <p className="text-xs text-muted-foreground/30 mt-2 text-center">
-            For informational purposes only. Not financial advice. Strategy: 14-day pairwise momentum · 5-regime market regime · Confidence Score v3 leverage gate.
+            For informational purposes only. Not financial advice. Strategy: 30-day pairwise momentum · 5-regime market regime · Confidence Score v3 leverage gate.
           </p>
         </footer>
 
