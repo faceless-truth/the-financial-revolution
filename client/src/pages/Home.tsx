@@ -1,11 +1,22 @@
-/**
+/*
  * The Financial Revolution — Strategy Dashboard
  * Design: Dark Precision — deep navy panels, luminous data, colour-coded signals
  * Fonts: Syne (display/numbers) + Geist (labels) + JetBrains Mono (data)
- * Strategy: Unified Momentum v7.0 — 30-day pairwise, 5-regime, Confidence v3, Leverage Gate
+ * Strategy: TREND_CONFIRM v7.0 Conservative — 30-day momentum, 4-rule decision flow, leverage disabled
  */
 
-import { useBinanceData, type Candle, type RegimeType, MAJORS, PER_ASSET_CAPS, LEVERAGE_CONFIDENCE_THRESHOLD, ADAPTIVE_THRESHOLDS, REGIME_ALLOCATION } from "@/hooks/useBinanceData";
+import {
+  useBinanceData,
+  type Candle,
+  MAJORS,
+  PER_ASSET_CAPS,
+  CASH_PARTIAL_THRESHOLD,
+  CASH_FULL_THRESHOLD,
+  MIN_HOLD_DAYS,
+  BTC_NEW_HIGH_DAYS,
+  BREAKOUT_THRESHOLD,
+  CONF_ZONE_HIGH,
+} from "@/hooks/useBinanceData";
 import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine } from "recharts";
 import {
   formatPrice,
@@ -14,7 +25,7 @@ import {
 } from "@/lib/formatters";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Shield, Gauge } from "lucide-react";
+import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge } from "lucide-react";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/dashboard-hero-bg-hgsqEWzXFhZWuFZbadExQL.webp";
 
@@ -30,36 +41,11 @@ const ASSET_COLORS: Record<string, string> = {
   DOGE: "oklch(0.78 0.18 75)",
 };
 
-// ── Regime display helpers ─────────────────────────────────────────────────────
-const REGIME_LABELS: Record<RegimeType, string> = {
-  STRONG_INVEST: "Strong Invest",
-  INVEST: "Invest",
-  NEUTRAL: "Neutral",
-  CASH: "Cash",
-  STRONG_CASH: "Strong Cash",
-};
-
-const REGIME_COLORS: Record<RegimeType, string> = {
-  STRONG_INVEST: "text-emerald-300",
-  INVEST: "text-emerald-400",
-  NEUTRAL: "text-amber-400",
-  CASH: "text-red-400",
-  STRONG_CASH: "text-red-300",
-};
-
-const REGIME_BORDER: Record<RegimeType, string> = {
-  STRONG_INVEST: "border-emerald-500/30 bg-emerald-500/5",
-  INVEST: "border-emerald-500/20 bg-emerald-500/5",
-  NEUTRAL: "border-amber-500/20 bg-amber-500/5",
-  CASH: "border-red-500/20 bg-red-500/5",
-  STRONG_CASH: "border-red-500/30 bg-red-500/8",
-};
-
 const CONFIDENCE_ZONE_COLORS: Record<string, string> = {
   HIGH: "text-emerald-300",
-  "MED-HIGH": "text-emerald-400",
-  MED: "text-amber-400",
-  "MED-LOW": "text-orange-400",
+  "MEDIUM-HIGH": "text-emerald-400",
+  MEDIUM: "text-amber-400",
+  "MEDIUM-LOW": "text-orange-400",
   LOW: "text-red-400",
 };
 
@@ -70,8 +56,6 @@ function signalClass(action: string): string {
     case "SELL_ALL": return "text-red-400 border-red-500/40 bg-red-500/10";
     case "ROTATE": return "text-amber-400 border-amber-500/40 bg-amber-500/10";
     case "REBALANCE": return "text-blue-400 border-blue-500/40 bg-blue-500/10";
-    case "INCREASE": return "text-emerald-300 border-emerald-400/40 bg-emerald-400/10";
-    case "REDUCE": return "text-orange-400 border-orange-500/40 bg-orange-500/10";
     default: return "text-muted-foreground border-border/40 bg-muted/10";
   }
 }
@@ -142,7 +126,12 @@ function SignalBadge({ action, large = false }: { action: string; large?: boolea
 }
 
 function ConfidenceBar({ score, zone }: { score: number; zone: string }) {
-  const color = zone === "HIGH" ? "oklch(0.72 0.18 155)" : zone === "MED-HIGH" ? "oklch(0.72 0.18 155 / 80%)" : zone === "MED" ? "oklch(0.78 0.18 75)" : zone === "MED-LOW" ? "oklch(0.75 0.20 50)" : "oklch(0.62 0.22 25)";
+  const color =
+    zone === "HIGH" ? "oklch(0.72 0.18 155)" :
+    zone === "MEDIUM-HIGH" ? "oklch(0.72 0.18 155 / 80%)" :
+    zone === "MEDIUM" ? "oklch(0.78 0.18 75)" :
+    zone === "MEDIUM-LOW" ? "oklch(0.75 0.20 50)" :
+    "oklch(0.62 0.22 25)";
   return (
     <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "oklch(1 0 0 / 8%)" }}>
       <div className="h-full rounded-full transition-all duration-700" style={{ width: `${score * 100}%`, background: color, boxShadow: `0 0 6px ${color}` }} />
@@ -152,34 +141,16 @@ function ConfidenceBar({ score, zone }: { score: number; zone: string }) {
 
 // ── Main dashboard ─────────────────────────────────────────────────────────────
 export default function Home() {
-  const { signal, assets, rankedAssets, regime, confidence, rawData, loading, error, lastUpdated } = useBinanceData(5 * 60 * 1000);
-  const [tick, setTick] = useState(0);
+  const { signal, assets, rankedAssets, btcHealth, confidence, rawData, loading, error, lastUpdated } = useBinanceData(5 * 60 * 1000);
+  const [, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 30_000);
     return () => clearInterval(t);
   }, []);
 
   const btcAsset = assets["BTC"];
-  const btcPrice = btcAsset?.price ?? 0;
+  const btcPrice = btcHealth.price;
   const btcCandles = rawData["BTC"] ?? [];
-  const btcHigh30 = btcCandles.length >= 30 ? Math.max(...btcCandles.slice(-30).map(c => c.high)) : 0;
-  const btcDrawdownPct = btcHigh30 > 0 ? ((btcPrice - btcHigh30) / btcHigh30) * 100 : 0; // negative = below high
-
-  // Re-entry: BTC price needed to make 30-day momentum positive
-  const btc30dAgo = btcCandles.length >= 31 ? btcCandles[btcCandles.length - 31].close : 0;
-  const reentryMet = btc30dAgo > 0 && btcPrice > btc30dAgo;
-  const reentryGapUsd = btc30dAgo - btcPrice;
-  const reentryGapPct = btc30dAgo > 0 ? ((btcPrice / btc30dAgo) - 1) * 100 : 0;
-
-  // Rolling re-entry thresholds (next 7 days)
-  const rollingReentry = btcCandles.length >= 31
-    ? Array.from({ length: 7 }, (_, i) => {
-        const idx = btcCandles.length - 30 + i; // candle that will be 30d ago in i days
-        if (idx < 0 || idx >= btcCandles.length) return null;
-        const tp = btcCandles[idx].close;
-        return { day: i + 1, triggerPrice: tp, gapPct: ((btcPrice / tp) - 1) * 100 };
-      }).filter(Boolean) as Array<{ day: number; triggerPrice: number; gapPct: number }>
-    : [];
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "Geist, sans-serif", background: "oklch(0.09 0.012 260)" }}>
@@ -196,7 +167,7 @@ export default function Home() {
               <h1 className="text-lg font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>
                 The Financial <span className="text-primary opacity-80">Revolution</span>
               </h1>
-              <p className="text-xs text-muted-foreground">Unified Momentum v7.0 · Live Binance Data · Executes 00:05 UTC</p>
+              <p className="text-xs text-muted-foreground">TREND_CONFIRM v7.0 Conservative · Live Binance Data · Executes 00:05 UTC</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -256,8 +227,8 @@ export default function Home() {
                 <div className="flex items-center gap-3">
                   <SignalBadge action={signal.action} large />
                   <div>
-                    <p className="text-xs text-muted-foreground">Allocation Mode</p>
-                    <p className="text-sm font-semibold mono-data text-foreground">{signal.allocationMode}</p>
+                    <p className="text-xs text-muted-foreground">Rule Triggered</p>
+                    <p className="text-sm font-semibold mono-data text-foreground">{signal.ruleTriggered || "—"}</p>
                   </div>
                 </div>
 
@@ -290,22 +261,17 @@ export default function Home() {
                           </span>
                         </div>
                       ))}
-                      {signal.allocationMode === "REMAINDER_SPLIT" && (
-                        <p className="text-xs text-muted-foreground/60 mt-1">Remainder split: primary asset hit cap, excess allocated to 2nd-best</p>
-                      )}
                     </div>
                   )}
                 </div>
 
-                {/* Leverage */}
-                <div className={`p-3 rounded-lg border ${signal.leverage > 1 ? "border-amber-500/30 bg-amber-500/8" : "border-border/20 bg-card/30"}`}>
+                {/* Leverage (disabled) */}
+                <div className="p-3 rounded-lg border border-border/20 bg-card/30">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-muted-foreground">Leverage Gate</span>
-                    <span className={`text-sm font-bold mono-data ${signal.leverage > 1 ? "text-amber-300" : "text-muted-foreground"}`}>
-                      {signal.leverage > 1 ? `${signal.leverage}x ACTIVE` : "1x (off)"}
-                    </span>
+                    <span className="text-sm font-bold mono-data text-muted-foreground">1x (disabled)</span>
                   </div>
-                  <p className="text-xs text-muted-foreground/60">{signal.leverageReason}</p>
+                  <p className="text-xs text-muted-foreground/60">Leverage disabled in v7.0 Conservative</p>
                 </div>
               </div>
             ) : null}
@@ -316,17 +282,17 @@ export default function Home() {
             <SectionHeader icon={<Target size={14} />} title="Re-Entry Trigger" subtitle="BTC 30-day momentum flip — when to re-enter from cash" />
             {loading && !signal ? (
               <div className="space-y-3"><Skeleton className="h-8 w-40" /><Skeleton className="h-4 w-full" /><Skeleton className="h-32 w-full" /></div>
-            ) : (
+            ) : signal ? (
               <div className="space-y-4">
                 {/* Trigger price */}
-                <div className={`p-4 rounded-lg border ${reentryMet ? "border-emerald-500/30 bg-emerald-500/8" : "border-primary/20 bg-primary/5"}`}>
-                  <p className="text-xs text-muted-foreground mb-1">14-Day Ago BTC Price (momentum pivot)</p>
+                <div className={`p-4 rounded-lg border ${signal.reentryAlreadyMet ? "border-emerald-500/30 bg-emerald-500/8" : "border-primary/20 bg-primary/5"}`}>
+                  <p className="text-xs text-muted-foreground mb-1">30-Day Ago BTC Price (momentum pivot)</p>
                   <AnimatedNumber
-                    value={formatPrice(btc30dAgo)}
+                    value={formatPrice(signal.reentryTriggerPrice)}
                     className="text-2xl font-bold text-white data-number"
                   />
                   <div className="flex items-center gap-2 mt-2">
-                    {reentryMet ? (
+                    {signal.reentryAlreadyMet ? (
                       <><CheckCircle size={13} className="text-emerald-400" /><span className="text-xs text-emerald-400 font-semibold">Momentum POSITIVE — BTC qualifies</span></>
                     ) : (
                       <><XCircle size={13} className="text-red-400" /><span className="text-xs text-red-400 font-semibold">Momentum NEGATIVE — below re-entry</span></>
@@ -335,30 +301,30 @@ export default function Home() {
                 </div>
 
                 {/* Gap */}
-                {!reentryMet && btc30dAgo > 0 && (
+                {!signal.reentryAlreadyMet && signal.reentryTriggerPrice > 0 && (
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
                       <p className="text-xs text-muted-foreground mb-1">Gap to Re-Entry</p>
-                      <p className="text-sm font-bold mono-data text-foreground">{formatPrice(Math.abs(reentryGapUsd))}</p>
+                      <p className="text-sm font-bold mono-data text-foreground">{formatPrice(Math.abs(signal.reentryGapUsd))}</p>
                     </div>
                     <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
                       <p className="text-xs text-muted-foreground mb-1">Gap %</p>
-                      <p className={`text-sm font-bold mono-data ${reentryGapPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatPct(reentryGapPct)}</p>
+                      <p className={`text-sm font-bold mono-data ${signal.reentryGapPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatPct(signal.reentryGapPct)}</p>
                     </div>
                   </div>
                 )}
 
                 {/* Rolling thresholds */}
-                {rollingReentry.length > 0 && (
+                {signal.reentryRolling.length > 0 && (
                   <div>
                     <p className="text-xs text-muted-foreground mb-2">Rolling Thresholds (window shifts daily at 00:05 UTC)</p>
                     <div className="space-y-1.5">
-                      {rollingReentry.map(r => (
-                        <div key={r.day} className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground mono-data">In {r.day}d</span>
+                      {signal.reentryRolling.map(r => (
+                        <div key={r.daysFromNow} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground mono-data">In {r.daysFromNow}d</span>
                           <span className="font-semibold mono-data text-foreground/80">{formatPrice(r.triggerPrice)}</span>
-                          <span className={`mono-data ${r.gapPct >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
-                            {r.gapPct >= 0 ? "✓ met" : `↑ ${formatPct(Math.abs(r.gapPct), false)} needed`}
+                          <span className={`mono-data ${r.deltaPct >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                            {r.deltaPct >= 0 ? "✓ met" : `↑ ${formatPct(Math.abs(r.deltaPct), false)} needed`}
                           </span>
                         </div>
                       ))}
@@ -366,112 +332,120 @@ export default function Home() {
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
         {/* ── ROW 2: BTC Health (full width) ──────────────────────────────────── */}
         <div className="panel p-5">
-          <SectionHeader icon={<Activity size={14} />} title="BTC Health" subtitle="Price, 30-day drawdown, MA levels" />
+          <SectionHeader icon={<Activity size={14} />} title="BTC Health" subtitle="Price, 30-day drawdown, cash trigger thresholds" />
           {loading && !btcAsset ? (
             <div className="space-y-3"><Skeleton className="h-8 w-40" /><Skeleton className="h-3 w-full" /><Skeleton className="h-4 w-2/3" /></div>
           ) : btcAsset ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {/* Price */}
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">BTC Price</p>
-                <AnimatedNumber value={formatPrice(btcPrice)} className="text-2xl font-bold text-white data-number" />
-                <p className={`text-xs mono-data mt-1 ${btcAsset.change24h >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                  {formatPct(btcAsset.change24h)} 24h
-                </p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Price */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">BTC Price</p>
+                  <AnimatedNumber value={formatPrice(btcPrice)} className="text-2xl font-bold text-white data-number" />
+                  <p className={`text-xs mono-data mt-1 ${btcAsset.change24h >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {formatPct(btcAsset.change24h)} 24h
+                  </p>
+                </div>
+                {/* 30d high & drawdown */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">30-Day High</p>
+                  <p className="text-xl font-bold mono-data text-foreground">{formatPrice(btcHealth.high30d)}</p>
+                  <p className={`text-xs mono-data mt-1 ${drawdownClass(-btcHealth.drawdownPct)}`}>
+                    {btcHealth.drawdownPct > 0 ? `-${btcHealth.drawdownPct.toFixed(1)}%` : "At high"} from high
+                  </p>
+                </div>
+                {/* Cash trigger status */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Cash Trigger</p>
+                  <p className={`text-xl font-bold mono-data ${btcHealth.cashTriggerStatus === "FULL" ? "text-red-400" : btcHealth.cashTriggerStatus === "PARTIAL" ? "text-amber-400" : "text-emerald-400"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                    {btcHealth.cashTriggerStatus}
+                  </p>
+                  <p className="text-xs mono-data mt-1 text-muted-foreground">
+                    {btcHealth.cashTriggerStatus === "NONE" ? `Partial at ${formatPrice(btcHealth.partialTriggerPrice)}` :
+                     btcHealth.cashTriggerStatus === "PARTIAL" ? `Full at ${formatPrice(btcHealth.fullTriggerPrice)}` :
+                     "Full cash — all sold"}
+                  </p>
+                </div>
+                {/* BTC Rallying */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">BTC Rallying</p>
+                  <p className={`text-xl font-bold mono-data ${btcHealth.isRallying ? "text-emerald-400" : "text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                    {btcHealth.isRallying ? "YES" : "NO"}
+                  </p>
+                  <p className="text-xs mono-data mt-1 text-muted-foreground">
+                    New high in last {BTC_NEW_HIGH_DAYS} days
+                  </p>
+                </div>
               </div>
-              {/* 30d high & drawdown */}
+
+              {/* Drawdown bar with threshold markers */}
               <div>
-                <p className="text-xs text-muted-foreground mb-1">30-Day High</p>
-                <p className="text-xl font-bold mono-data text-foreground">{formatPrice(btcHigh30)}</p>
-                <p className={`text-xs mono-data mt-1 ${drawdownClass(btcDrawdownPct)}`}>
-                  {formatPct(btcDrawdownPct, false)} from high
-                </p>
+                <div className="flex justify-between text-xs text-muted-foreground/60 mb-1">
+                  <span>BTC Drawdown from 30d High</span>
+                  <span className={`font-semibold mono-data ${drawdownClass(-btcHealth.drawdownPct)}`}>
+                    {btcHealth.drawdownPct > 0 ? `-${btcHealth.drawdownPct.toFixed(1)}%` : "0%"}
+                  </span>
+                </div>
+                <div className="relative h-2 rounded-full overflow-hidden" style={{ background: "oklch(1 0 0 / 8%)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{
+                      width: `${Math.min(btcHealth.drawdownPct / 30 * 100, 100)}%`,
+                      background: btcHealth.cashTriggerStatus === "FULL" ? "oklch(0.62 0.22 25)" :
+                                  btcHealth.cashTriggerStatus === "PARTIAL" ? "oklch(0.78 0.18 75)" :
+                                  "oklch(0.72 0.18 155)",
+                    }}
+                  />
+                  {/* Partial trigger marker at 12% */}
+                  <div className="absolute top-0 bottom-0 w-px bg-amber-400/60" style={{ left: `${CASH_PARTIAL_THRESHOLD / 0.30 * 100}%` }} />
+                  {/* Full trigger marker at 25% */}
+                  <div className="absolute top-0 bottom-0 w-px bg-red-400/60" style={{ left: `${CASH_FULL_THRESHOLD / 0.30 * 100}%` }} />
+                </div>
+                <div className="flex justify-between text-xs mt-1 text-muted-foreground/40">
+                  <span>0%</span>
+                  <span className="text-amber-400/60">{(CASH_PARTIAL_THRESHOLD * 100).toFixed(0)}% partial</span>
+                  <span className="text-red-400/60">{(CASH_FULL_THRESHOLD * 100).toFixed(0)}% full</span>
+                  <span>30%</span>
+                </div>
               </div>
-              {/* MA200 */}
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">200-Day MA</p>
-                <p className="text-xl font-bold mono-data text-foreground">{formatPrice(btcAsset.ma200)}</p>
-                <p className={`text-xs mono-data mt-1 ${btcPrice > btcAsset.ma200 ? "text-emerald-400" : "text-red-400"}`}>
-                  BTC {btcPrice > btcAsset.ma200 ? "ABOVE" : "BELOW"} MA200
-                </p>
-              </div>
-              {/* 90d MA (STH proxy) */}
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">90-Day MA (STH Proxy)</p>
-                <p className="text-xl font-bold mono-data text-foreground">{formatPrice(btcAsset.ma90)}</p>
-                <p className="text-xs mono-data mt-1 text-muted-foreground">
-                  Ratio: <span className={confidence.sthRatio > 1.08 ? "text-emerald-400" : confidence.sthRatio > 0.97 ? "text-amber-400" : "text-red-400"}>{confidence.sthRatio.toFixed(3)}</span>
-                </p>
+
+              {/* MA levels */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
+                  <p className="text-xs text-muted-foreground mb-1">200-Day MA</p>
+                  <p className="text-sm font-bold mono-data text-foreground">{formatPrice(btcAsset.ma200)}</p>
+                  <p className={`text-xs mono-data mt-0.5 ${confidence.btcAbove200 ? "text-emerald-400" : "text-red-400"}`}>
+                    BTC {confidence.btcAbove200 ? "ABOVE" : "BELOW"} MA200
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
+                  <p className="text-xs text-muted-foreground mb-1">90-Day MA (STH Proxy)</p>
+                  <p className="text-sm font-bold mono-data text-foreground">{formatPrice(btcAsset.ma90)}</p>
+                  <p className="text-xs mono-data mt-0.5 text-muted-foreground">
+                    Ratio: <span className={confidence.sthRatio > 1.08 ? "text-emerald-400" : confidence.sthRatio > 0.97 ? "text-amber-400" : "text-red-400"}>{confidence.sthRatio.toFixed(3)}</span>
+                  </p>
+                </div>
               </div>
             </div>
           ) : null}
         </div>
 
-        {/* ── ROW 3: Market Regime + Confidence v3 ────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-          {/* MARKET REGIME */}
-          <div className="panel p-5">
-            <SectionHeader icon={<Shield size={14} />} title="Market Regime" subtitle="5-state regime from BTC trend + momentum breadth" />
-            {loading ? (
-              <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-4 w-3/4" /></div>
-            ) : (
+        {/* ── ROW 3: Confidence v3 ─────────────────────────────────────────────── */}
+        <div className="panel p-5">
+          <SectionHeader icon={<Gauge size={14} />} title="Confidence Score v3" subtitle="F&G 55% + STH Proxy (BTC / 90d MA) 45% — leverage gate disabled in v7.0 Conservative" />
+          {loading ? (
+            <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-4 w-3/4" /></div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Score */}
               <div className="space-y-4">
-                {/* Current regime */}
-                <div className={`p-4 rounded-lg border ${REGIME_BORDER[regime.regime]}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Current Regime</p>
-                      <p className={`text-2xl font-bold ${REGIME_COLORS[regime.regime]}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                        {REGIME_LABELS[regime.regime]}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-muted-foreground mb-1">Composite Score</p>
-                      <p className="text-2xl font-bold mono-data text-foreground">{regime.compositeScore.toFixed(3)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between mt-3 text-sm">
-                    <span className="text-muted-foreground">Allocation</span>
-                    <span className={`font-bold mono-data ${REGIME_COLORS[regime.regime]}`}>{(regime.allocation * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1 text-sm">
-                    <span className="text-muted-foreground">Entry Threshold</span>
-                    <span className="font-bold mono-data text-foreground">{regime.entryThreshold.toFixed(1)}</span>
-                  </div>
-                </div>
-
-                {/* Regime scale */}
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2">Regime Scale (composite score)</p>
-                  <div className="space-y-1.5">
-                    {(["STRONG_INVEST", "INVEST", "NEUTRAL", "CASH", "STRONG_CASH"] as RegimeType[]).map(r => (
-                      <div key={r} className={`flex items-center justify-between text-xs p-2 rounded ${r === regime.regime ? REGIME_BORDER[r] + " border" : "opacity-40"}`}>
-                        <span className={REGIME_COLORS[r]}>{REGIME_LABELS[r]}</span>
-                        <span className="mono-data text-muted-foreground">{(REGIME_ALLOCATION[r] * 100).toFixed(0)}% · threshold {ADAPTIVE_THRESHOLDS[r]}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* CONFIDENCE SCORE V3 */}
-          <div className="panel p-5">
-            <SectionHeader icon={<Gauge size={14} />} title="Confidence Score v3" subtitle="F&G 55% + STH Proxy 45% → Leverage Gate at ≥0.68" />
-            {loading ? (
-              <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-4 w-3/4" /></div>
-            ) : (
-              <div className="space-y-4">
-                {/* Score */}
-                <div className={`p-4 rounded-lg border ${confidence.leverageFiring ? "border-amber-500/30 bg-amber-500/8" : "border-border/20 bg-card/30"}`}>
+                <div className="p-4 rounded-lg border border-border/20 bg-card/30">
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Confidence v3 Score</p>
@@ -487,48 +461,45 @@ export default function Home() {
                   <ConfidenceBar score={confidence.score} zone={confidence.zone} />
                   <div className="flex justify-between text-xs mt-1.5 text-muted-foreground/50">
                     <span>0 — LOW</span>
-                    <span className="text-amber-400/70">0.68 leverage gate</span>
+                    <span className="text-muted-foreground/40">{CONF_ZONE_HIGH} leverage gate (disabled)</span>
                     <span>1 — HIGH</span>
                   </div>
                 </div>
+              </div>
 
-                {/* Components */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Fear & Greed Index (55%)</span>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded border font-semibold mono-data ${confidence.fngValue >= 55 ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" : confidence.fngValue >= 40 ? "text-amber-400 border-amber-500/30 bg-amber-500/10" : "text-red-400 border-red-500/30 bg-red-500/10"}`}>
-                        {confidence.fngValue}
-                      </span>
-                      <span className="text-xs text-muted-foreground/60 mono-data">30d avg: {confidence.fng30dAvg.toFixed(0)}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">STH Proxy — BTC/90d MA (45%)</span>
-                    <span className={`font-semibold mono-data ${confidence.sthRatio > 1.08 ? "text-emerald-400" : confidence.sthRatio > 0.97 ? "text-amber-400" : "text-red-400"}`}>
-                      {confidence.sthRatio.toFixed(3)}
+              {/* Components */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Fear & Greed Index (55%)</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-0.5 rounded border font-semibold mono-data ${confidence.fngValue >= 55 ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" : confidence.fngValue >= 40 ? "text-amber-400 border-amber-500/30 bg-amber-500/10" : "text-red-400 border-red-500/30 bg-red-500/10"}`}>
+                      {confidence.fngValue}
                     </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">BTC above 200d MA</span>
-                    <span className={`flex items-center gap-1 font-semibold ${confidence.btcAbove200 ? "text-emerald-400" : "text-red-400"}`}>
-                      {confidence.btcAbove200 ? <><CheckCircle size={12} /> YES</> : <><XCircle size={12} /> NO</>}
-                    </span>
+                    <span className="text-xs text-muted-foreground/60 mono-data">30d avg: {confidence.fng30dAvg.toFixed(0)}</span>
                   </div>
                 </div>
-
-                {/* Leverage gate */}
-                <div className={`p-3 rounded-lg border ${confidence.leverageFiring ? "border-amber-500/30 bg-amber-500/8" : "border-border/20"}`}>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">STH Proxy — BTC/90d MA (45%)</span>
+                  <span className={`font-semibold mono-data ${confidence.sthRatio > 1.08 ? "text-emerald-400" : confidence.sthRatio > 0.97 ? "text-amber-400" : "text-red-400"}`}>
+                    {confidence.sthRatio.toFixed(3)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">BTC above 200d MA</span>
+                  <span className={`flex items-center gap-1 font-semibold ${confidence.btcAbove200 ? "text-emerald-400" : "text-red-400"}`}>
+                    {confidence.btcAbove200 ? <><CheckCircle size={12} /> YES</> : <><XCircle size={12} /> NO</>}
+                  </span>
+                </div>
+                <div className="p-3 rounded-lg border border-border/20 bg-card/20 mt-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">2x Leverage Gate ({LEVERAGE_CONFIDENCE_THRESHOLD}+ AND BTC {'>'} MA200)</span>
-                    <span className={`text-xs font-bold ${confidence.leverageFiring ? "text-amber-300" : "text-muted-foreground"}`}>
-                      {confidence.leverageFiring ? "🔥 FIRING" : "OFF"}
-                    </span>
+                    <span className="text-xs text-muted-foreground">2x Leverage Gate (≥{CONF_ZONE_HIGH} AND BTC &gt; MA200)</span>
+                    <span className="text-xs font-bold text-muted-foreground/50">DISABLED</span>
                   </div>
+                  <p className="text-xs text-muted-foreground/40 mt-1">Leverage disabled in v7.0 Conservative — always 1x</p>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* ── ROW 4: Momentum Scores + Decision Flow ──────────────────────────── */}
@@ -536,17 +507,17 @@ export default function Home() {
 
           {/* MOMENTUM SCORES */}
           <div className="panel p-5">
-            <SectionHeader icon={<BarChart2 size={14} />} title="14-Day Pairwise Momentum" subtitle="Ranked by risk-adjusted score (pairwise × vol ratio)" />
+            <SectionHeader icon={<BarChart2 size={14} />} title="30-Day Momentum Scores" subtitle="Ranked by direct 30-day % return — best score wins" />
             {loading && !rankedAssets.length ? (
               <div className="space-y-3">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
             ) : (
               <div className="space-y-2">
-                {rankedAssets.map(({ symbol, riskAdjScore, rank }) => {
+                {rankedAssets.map(({ symbol, score, rank }) => {
                   const m = assets[symbol];
                   const isTarget = signal ? symbol in signal.targetPositions : false;
-                  const maxScore = rankedAssets[0]?.riskAdjScore ?? 1;
-                  const barWidth = maxScore > 0 ? (Math.abs(riskAdjScore) / maxScore) * 100 : 0;
-                  const isPositive = riskAdjScore >= 0;
+                  const maxScore = Math.max(...rankedAssets.map(r => Math.abs(r.score)), 1);
+                  const barWidth = (Math.abs(score) / maxScore) * 100;
+                  const isPositive = score >= 0;
 
                   return (
                     <div key={symbol} className={`relative p-3 rounded-lg border transition-all duration-300 ${isTarget ? "border-emerald-500/30 bg-emerald-500/5" : "border-border/30 hover:border-border/60"}`}>
@@ -562,7 +533,7 @@ export default function Home() {
                             </div>
                             <div className="flex items-center gap-3">
                               {m && <span className="text-xs text-muted-foreground mono-data">{formatPrice(m.price)}</span>}
-                              <AnimatedNumber value={riskAdjScore.toFixed(1)} className={`text-sm font-bold mono-data ${momentumClass(riskAdjScore)}`} />
+                              <AnimatedNumber value={`${score >= 0 ? "+" : ""}${score.toFixed(1)}%`} className={`text-sm font-bold mono-data ${momentumClass(score)}`} />
                             </div>
                           </div>
                           <div className="relative h-1.5 rounded-full overflow-hidden" style={{ background: "oklch(1 0 0 / 6%)" }}>
@@ -578,10 +549,11 @@ export default function Home() {
                       </div>
                       {m && (
                         <div className="flex items-center gap-4 mt-2 pl-11">
-                          <span className="text-xs text-muted-foreground/60 mono-data">30d: <span className={momentumClass(m.momentum30)}>{formatPct(m.momentum30)}</span></span>
-                          <span className="text-xs text-muted-foreground/60 mono-data">Vol↑/↓: <span className="text-foreground/60">{m.volRatio.toFixed(2)}</span></span>
                           <span className="text-xs text-muted-foreground/60 mono-data">DD: <span className={drawdownClass(m.drawdownFromHigh30)}>{formatPct(m.drawdownFromHigh30, false)}</span></span>
                           <span className={`text-xs mono-data ${m.change24h >= 0 ? "text-emerald-400/70" : "text-red-400/70"}`}>24h: {formatPct(m.change24h)}</span>
+                          <span className={`text-xs mono-data ${m.nearHigh30 ? "text-emerald-400/70" : "text-muted-foreground/40"}`}>
+                            {m.nearHigh30 ? "✓ near high" : `↑ ${formatPct(Math.abs(m.drawdownFromHigh30), false)} to breakout`}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -593,83 +565,108 @@ export default function Home() {
 
           {/* DECISION FLOW */}
           <div className="panel p-5">
-            <SectionHeader icon={<Target size={14} />} title="Decision Flow" subtitle="Rules evaluated in order — daily candle close only" />
+            <SectionHeader icon={<Target size={14} />} title="Decision Flow" subtitle="4 rules evaluated in order — daily candle close only" />
             {loading && !signal ? (
-              <div className="space-y-2">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+              <div className="space-y-2">{[1,2,3,4].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
             ) : signal ? (
               <div className="space-y-2">
-                {/* Rule 1: Regime check */}
+
+                {/* Rule 1: Cash trigger */}
                 {(() => {
-                  const cashRegime = regime.regime === "CASH" || regime.regime === "STRONG_CASH";
-                  const neutralRegime = regime.regime === "NEUTRAL";
-                  const investRegime = !cashRegime && !neutralRegime;
+                  const triggered = signal.ruleTriggered === "CASH_FULL" || signal.ruleTriggered === "CASH_PARTIAL";
+                  const isActive = btcHealth.cashTriggerStatus !== "NONE";
                   return (
-                    <>
-                      <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${cashRegime ? "border-red-500/40 bg-red-500/8" : "border-emerald-500/20 bg-emerald-500/5"}`}>
-                        <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${cashRegime ? "bg-red-500/20 text-red-400" : "bg-emerald-500/20 text-emerald-400"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                          {cashRegime ? "!" : "✓"}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-foreground/90" style={{ fontFamily: "Geist, sans-serif" }}>Market Regime</span>
-                            {cashRegime && <span className="text-xs text-red-400 font-mono">TRIGGERED</span>}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5 mono-data">Regime: {REGIME_LABELS[regime.regime]} (score: {regime.compositeScore.toFixed(3)}, alloc: {(regime.allocation * 100).toFixed(0)}%)</p>
-                          {cashRegime && <p className="text-xs text-red-300 mt-1 font-medium">→ SELL ALL — cash regime, 0% allocation</p>}
-                        </div>
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-red-500/40 bg-red-500/8" : isActive ? "border-amber-500/30 bg-amber-500/8" : "border-emerald-500/20 bg-emerald-500/5"}`}>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-red-500/20 text-red-400" : isActive ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                        {triggered ? "!" : isActive ? "~" : "✓"}
                       </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground/90">Rule 1 — Cash Trigger</span>
+                          {triggered && <span className="text-xs text-red-400 font-mono">TRIGGERED</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 mono-data">
+                          BTC drawdown: {btcHealth.drawdownPct.toFixed(1)}% · Partial at {(CASH_PARTIAL_THRESHOLD * 100).toFixed(0)}% · Full at {(CASH_FULL_THRESHOLD * 100).toFixed(0)}%
+                        </p>
+                        {triggered && <p className="text-xs text-red-300 mt-1 font-medium">→ {signal.reason}</p>}
+                        {isActive && !triggered && <p className="text-xs text-amber-300 mt-1 font-medium">→ PARTIAL cash — 50% allocation</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
 
-                      <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${!cashRegime && signal.action === "HOLD" && signal.allocationMode === "CASH" ? "border-amber-500/40 bg-amber-500/8" : cashRegime ? "border-border/20 opacity-40" : "border-emerald-500/20 bg-emerald-500/5"}`}>
-                        <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${!cashRegime && signal.action === "HOLD" && signal.allocationMode === "CASH" ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                          {!cashRegime && signal.action === "HOLD" && signal.allocationMode === "CASH" ? "!" : cashRegime ? "2" : "✓"}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-foreground/90" style={{ fontFamily: "Geist, sans-serif" }}>Threshold Check</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5 mono-data">
-                            Top score: {rankedAssets[0]?.riskAdjScore.toFixed(1) ?? "—"} vs threshold {regime.entryThreshold} ({regime.regime})
-                          </p>
-                          {!cashRegime && signal.action === "HOLD" && signal.allocationMode === "CASH" && (
-                            <p className="text-xs text-amber-300 mt-1 font-medium">→ No asset meets threshold — HOLD cash</p>
-                          )}
-                        </div>
+                {/* Rule 2: Min-hold */}
+                {(() => {
+                  const triggered = signal.ruleTriggered === "MIN_HOLD";
+                  return (
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-amber-500/40 bg-amber-500/8" : "border-border/20 bg-card/20"}`}>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                        {triggered ? "!" : "2"}
                       </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground/90">Rule 2 — Min-Hold Period</span>
+                          {triggered && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 mono-data">
+                          {triggered ? `Held ${signal.daysHeld}/${MIN_HOLD_DAYS} days — rotation blocked` : `Min hold: ${MIN_HOLD_DAYS} days`}
+                        </p>
+                        {triggered && <p className="text-xs text-amber-300 mt-1 font-medium">→ {signal.reason}</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
 
-                      <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${signal.action === "BUY" && signal.allocationMode === "REMAINDER_SPLIT" ? "border-emerald-500/30 bg-emerald-500/5" : signal.action === "BUY" ? "border-emerald-500/30 bg-emerald-500/5" : "border-border/20 opacity-40"}`}>
-                        <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${signal.action === "BUY" ? "bg-emerald-500/20 text-emerald-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                          {signal.action === "BUY" ? "✓" : "3"}
-                        </div>
-                        <div className="flex-1">
-                          <span className="text-xs font-semibold text-foreground/90" style={{ fontFamily: "Geist, sans-serif" }}>Asset Selection</span>
-                          <p className="text-xs text-muted-foreground mt-0.5 mono-data">
-                            Top: {rankedAssets[0]?.symbol ?? "—"} (score {rankedAssets[0]?.riskAdjScore.toFixed(1) ?? "—"})
-                            {signal.allocationMode === "REMAINDER_SPLIT" ? ` + ${Object.keys(signal.targetPositions)[1]} remainder split` : ""}
-                          </p>
-                          {signal.action === "BUY" && <p className="text-xs text-emerald-300 mt-1 font-medium">→ {signal.reason}</p>}
-                        </div>
+                {/* Rule 3: BTC rally */}
+                {(() => {
+                  const triggered = signal.ruleTriggered === "BTC_RALLY";
+                  return (
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-amber-500/40 bg-amber-500/8" : btcHealth.isRallying ? "border-amber-500/20 bg-amber-500/5" : "border-border/20 bg-card/20"}`}>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                        {triggered ? "!" : "3"}
                       </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground/90">Rule 3 — BTC Rally Block</span>
+                          {triggered && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 mono-data">
+                          BTC rallying (new high in last {BTC_NEW_HIGH_DAYS}d): {btcHealth.isRallying ? "YES — alts blocked" : "NO — alts allowed"}
+                        </p>
+                        {triggered && <p className="text-xs text-amber-300 mt-1 font-medium">→ {signal.reason}</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
 
-                      <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${signal.leverage > 1 ? "border-amber-500/40 bg-amber-500/8" : "border-border/20 opacity-40"}`}>
-                        <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${signal.leverage > 1 ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                          {signal.leverage > 1 ? "⚡" : "4"}
-                        </div>
-                        <div className="flex-1">
-                          <span className="text-xs font-semibold text-foreground/90" style={{ fontFamily: "Geist, sans-serif" }}>Leverage Gate</span>
-                          <p className="text-xs text-muted-foreground mt-0.5 mono-data">
-                            Confidence v3 {confidence.score.toFixed(3)} {confidence.score >= LEVERAGE_CONFIDENCE_THRESHOLD ? "≥" : "<"} {LEVERAGE_CONFIDENCE_THRESHOLD} · BTC {confidence.btcAbove200 ? ">" : "<"} MA200
-                          </p>
-                          {signal.leverage > 1 && <p className="text-xs text-amber-300 mt-1 font-medium">→ 2x leverage applied</p>}
-                        </div>
+                {/* Rule 4: Breakout check */}
+                {(() => {
+                  const triggered = signal.ruleTriggered === "NO_BREAKOUT";
+                  const bestAsset = rankedAssets[0];
+                  const bestMetric = bestAsset ? assets[bestAsset.symbol] : null;
+                  return (
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-amber-500/40 bg-amber-500/8" : "border-border/20 bg-card/20"}`}>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                        {triggered ? "!" : "4"}
                       </div>
-                    </>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground/90">Rule 4 — Breakout Check</span>
+                          {triggered && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 mono-data">
+                          {bestAsset ? `${bestAsset.symbol} within ${(BREAKOUT_THRESHOLD * 100).toFixed(0)}% of 30d high: ${bestMetric?.nearHigh30 ? "YES ✓" : "NO ✗"}` : "No asset data"}
+                        </p>
+                        {triggered && <p className="text-xs text-amber-300 mt-1 font-medium">→ {signal.reason}</p>}
+                      </div>
+                    </div>
                   );
                 })()}
 
                 {/* Active rule summary */}
                 <div className="mt-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
                   <p className="text-xs text-muted-foreground mb-1">Active Signal</p>
-                  <p className="text-sm font-semibold text-foreground mono-data">{signal.action} · {signal.allocationMode}</p>
+                  <p className="text-sm font-semibold text-foreground mono-data">{signal.action} · {signal.ruleTriggered || "HOLD"}</p>
                   <p className="text-xs text-muted-foreground mt-1">{signal.reason}</p>
                 </div>
               </div>
@@ -685,15 +682,23 @@ export default function Home() {
               <LineChart data={btcCandles.slice(-30).map(c => ({ date: c.date.slice(5), price: c.close }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <XAxis dataKey="date" tick={{ fill: "oklch(0.55 0.010 260)", fontSize: 10 }} tickLine={false} axisLine={false} interval={4} />
                 <YAxis domain={["auto", "auto"]} tick={{ fill: "oklch(0.55 0.010 260)", fontSize: 10 }} tickLine={false} axisLine={false} width={60} tickFormatter={v => formatPrice(v)} />
-                {btcHigh30 > 0 && <ReferenceLine y={btcHigh30} stroke="oklch(0.78 0.18 75)" strokeDasharray="4 2" strokeOpacity={0.6} />}
-                {btc30dAgo > 0 && !reentryMet && <ReferenceLine y={btc30dAgo} stroke="oklch(0.60 0.22 255)" strokeDasharray="3 3" strokeOpacity={0.5} />}
+                {btcHealth.high30d > 0 && <ReferenceLine y={btcHealth.high30d} stroke="oklch(0.78 0.18 75)" strokeDasharray="4 2" strokeOpacity={0.6} />}
+                {btcHealth.partialTriggerPrice > 0 && <ReferenceLine y={btcHealth.partialTriggerPrice} stroke="oklch(0.78 0.18 75 / 50%)" strokeDasharray="3 3" strokeOpacity={0.5} />}
+                {btcHealth.fullTriggerPrice > 0 && <ReferenceLine y={btcHealth.fullTriggerPrice} stroke="oklch(0.62 0.22 25 / 60%)" strokeDasharray="3 3" strokeOpacity={0.5} />}
+                {signal && !signal.reentryAlreadyMet && signal.reentryTriggerPrice > 0 && (
+                  <ReferenceLine y={signal.reentryTriggerPrice} stroke="oklch(0.60 0.22 255)" strokeDasharray="3 3" strokeOpacity={0.5} />
+                )}
                 <Line type="monotone" dataKey="price" stroke="oklch(0.78 0.18 75)" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "oklch(0.78 0.18 75)" }} />
                 <Tooltip contentStyle={{ background: "oklch(0.13 0.012 260)", border: "1px solid oklch(1 0 0 / 10%)", borderRadius: 6, fontSize: 11 }} formatter={(v: number) => [formatPrice(v), "BTC Close"]} />
               </LineChart>
             </ResponsiveContainer>
             <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground/60">
-              <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.78 0.18 75 / 60%)", borderTop: "1px dashed" }} /> 30d High: <span className="text-amber-300 font-semibold mono-data">{formatPrice(btcHigh30)}</span></span>
-              {!reentryMet && btc30dAgo > 0 && <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.60 0.22 255 / 50%)", borderTop: "1px dashed" }} /> Re-entry: <span className="text-primary/80 mono-data">{formatPrice(btc30dAgo)}</span></span>}
+              <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.78 0.18 75 / 60%)", borderTop: "1px dashed" }} /> 30d High: <span className="text-amber-300 font-semibold mono-data">{formatPrice(btcHealth.high30d)}</span></span>
+              <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.78 0.18 75 / 40%)", borderTop: "1px dashed" }} /> Partial trigger: <span className="text-amber-400/70 mono-data">{formatPrice(btcHealth.partialTriggerPrice)}</span></span>
+              <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.62 0.22 25 / 50%)", borderTop: "1px dashed" }} /> Full trigger: <span className="text-red-400/70 mono-data">{formatPrice(btcHealth.fullTriggerPrice)}</span></span>
+              {signal && !signal.reentryAlreadyMet && signal.reentryTriggerPrice > 0 && (
+                <span className="flex items-center gap-1.5"><span className="w-4 h-px inline-block" style={{ background: "oklch(0.60 0.22 255 / 50%)", borderTop: "1px dashed" }} /> Re-entry: <span className="text-primary/80 mono-data">{formatPrice(signal.reentryTriggerPrice)}</span></span>
+              )}
             </div>
           </div>
         )}
@@ -736,7 +741,6 @@ export default function Home() {
                       <div>
                         <p className="text-xs text-muted-foreground">30d Momentum</p>
                         <p className={`text-lg font-bold mono-data ${momentumClass(m.momentum30)}`} style={{ fontFamily: "Syne, sans-serif" }}>{formatPct(m.momentum30)}</p>
-                        <p className="text-xs text-muted-foreground/50 mono-data">score: {ranked?.riskAdjScore.toFixed(1) ?? "—"}</p>
                       </div>
                       <div>
                         <div className="flex justify-between text-xs mb-1">
@@ -769,14 +773,14 @@ export default function Home() {
         {/* ── FOOTER ─────────────────────────────────────────────────────────── */}
         <footer className="border-t border-border/20 pt-4 pb-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/50">
-            <p>The Financial Revolution · Unified Momentum v7.0 · TFR Investing Engine</p>
+            <p>The Financial Revolution · TREND_CONFIRM v7.0 Conservative · TFR Investing Engine</p>
             <p className="mono-data">
               {lastUpdated ? `Last updated: ${lastUpdated.toLocaleTimeString()}` : "Fetching live data..."}
               {" · "}Refreshes every 5 min · Executes 00:05 UTC
             </p>
           </div>
           <p className="text-xs text-muted-foreground/30 mt-2 text-center">
-            For informational purposes only. Not financial advice. Strategy: 30-day pairwise momentum · 5-regime market regime · Confidence Score v3 leverage gate.
+            For informational purposes only. Not financial advice. Strategy: 30-day momentum · 4-rule decision flow · Confidence Score v3 · Leverage disabled.
           </p>
         </footer>
 

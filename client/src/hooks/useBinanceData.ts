@@ -1,17 +1,19 @@
-/**
- * useBinanceData — Unified Momentum Strategy v7.0
- * ================================================
- * Mirrors unified_momentum_strategy.py exactly:
+/*
+ * useBinanceData — TREND_CONFIRM Strategy v7.0 Conservative
+ * ==========================================================
+ * Mirrors TrendConfirmStrategy exactly:
  *
- * - 30-day pairwise momentum scoring (winners/losers) + directional vol ratio
- * - 5-regime market regime: STRONG_INVEST / INVEST / NEUTRAL / CASH / STRONG_CASH
- * - Confidence Score v3: F&G 55% + STH Proxy (BTC/90d MA) 45%
- * - Leverage gate: confidence_v3 >= 0.68 AND BTC > 200d MA → 2x
- * - Adaptive entry thresholds per regime
- * - Asset caps: BTC/ETH/SOL 100%, SUI/DOGE 60%
- * - Remainder Split when primary asset hits cap
- * - Actions: HOLD / BUY / SELL_ALL / ROTATE / REBALANCE / INCREASE / REDUCE
+ * - 30-day momentum: (close / close[30d ago] - 1) * 100  — direct, no pairwise
+ * - Cash triggers: BTC drawdown from 30d high ≥ 12% (PARTIAL) or ≥ 25% (FULL)
+ * - Rule 1: Cash triggers (NONE / PARTIAL / FULL)
+ * - Rule 2: Min-hold 14 days — block rotation if current asset held < 14 days
+ * - Rule 3: BTC rally — if BTC made new high in last 5 days, block alts
+ * - Rule 4: Breakout check — alt must be within 5% of 30d high
+ * - Rule 5: Asset selection — best 30d momentum with positive score
+ * - Confidence Score v3: F&G 55% + STH Proxy (BTC / 90d MA) 45%
+ * - Leverage: DISABLED (LEVERAGE_ENABLED = false)
  * - Execution: 00:05 UTC daily
+ * - Backtest: +413% return, 60% max DD, +211pp vs BTC (2021–2026)
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -36,28 +38,21 @@ export const PER_ASSET_CAPS: Record<Asset, number> = {
   DOGE: 0.6,
 };
 
-const MOMENTUM_PERIOD = 30;
-const VOLATILITY_WINDOW = 14;
-export const MIN_SCORE = 10.0;
-export const SECOND_BEST_MIN_SCORE = 3.0;
+export const MOMENTUM_PERIOD = 30;
+export const HIGH_LOOKBACK = 30;
+export const CASH_PARTIAL_THRESHOLD = 0.12;  // 12%
+export const CASH_FULL_THRESHOLD = 0.25;     // 25%
+export const MIN_HOLD_DAYS = 14;
+export const BTC_NEW_HIGH_DAYS = 5;
+export const BREAKOUT_THRESHOLD = 0.05;      // within 5% of 30d high
+export const LEVERAGE_ENABLED = false;
 export const LEVERAGE_MULTIPLIER = 2.0;
-export const LEVERAGE_CONFIDENCE_THRESHOLD = 0.68;
 
-export const ADAPTIVE_THRESHOLDS: Record<string, number> = {
-  STRONG_INVEST: 3.0,
-  INVEST: 5.0,
-  NEUTRAL: 10.0,
-  CASH: 15.0,
-  STRONG_CASH: 20.0,
-};
-
-export const REGIME_ALLOCATION: Record<string, number> = {
-  STRONG_INVEST: 1.0,
-  INVEST: 1.0,
-  NEUTRAL: 0.5,
-  CASH: 0.0,
-  STRONG_CASH: 0.0,
-};
+// Confidence Score v3 zone thresholds
+export const CONF_ZONE_HIGH = 0.68;
+export const CONF_ZONE_MED_HIGH = 0.55;
+export const CONF_ZONE_MED = 0.40;
+export const CONF_ZONE_MED_LOW = 0.28;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface Candle {
@@ -73,63 +68,89 @@ export interface Candle {
 export interface AssetMetrics {
   symbol: Asset;
   price: number;
-  momentum30: number;
-  momentum5: number;
-  pairwiseScore: number;
-  riskAdjScore: number;
-  volRatio: number;
-  upsideVol: number;
-  downsideVol: number;
-  totalVol: number;
-  drawdownFromHigh30: number;
+  momentum30: number;        // direct 30-day %
   change24h: number;
-  ma200: number;
+  drawdownFromHigh30: number; // negative = below high
+  nearHigh30: boolean;       // within 5% of 30d high
+  high30: number;
   ma90: number;
-  nearHigh30: boolean;
+  ma200: number;
+}
+
+export type CashTriggerStatus = "NONE" | "PARTIAL" | "FULL";
+
+export interface BtcHealth {
+  price: number;
+  high30d: number;
+  drawdownPct: number;       // positive = drawdown (e.g. 15 = 15% below high)
+  isRallying: boolean;       // new high in last BTC_NEW_HIGH_DAYS days
+  cashTriggerStatus: CashTriggerStatus;
+  partialTriggerPrice: number;
+  fullTriggerPrice: number;
+  allocationMultiplier: number; // 1.0 / 0.5 / 0.0
 }
 
 export interface ConfidenceV3 {
   score: number;
-  zone: "LOW" | "MED-LOW" | "MED" | "MED-HIGH" | "HIGH";
+  zone: "LOW" | "MEDIUM-LOW" | "MEDIUM" | "MEDIUM-HIGH" | "HIGH";
   fngValue: number;
   fng30dAvg: number;
   sthRatio: number;
   btcAbove200: boolean;
+  leverageEnabled: boolean;
   leverageFiring: boolean;
   leverageReason: string;
 }
 
-export type RegimeType = "STRONG_INVEST" | "INVEST" | "NEUTRAL" | "CASH" | "STRONG_CASH";
-
-export interface MarketRegime {
-  regime: RegimeType;
-  compositeScore: number;
-  allocation: number;
-  entryThreshold: number;
-}
+export type RuleTriggered =
+  | "CASH_FULL"
+  | "CASH_PARTIAL"
+  | "MIN_HOLD"
+  | "BTC_RALLY"
+  | "NO_BREAKOUT"
+  | "BTC_BEST"
+  | "ALT_BREAKOUT"
+  | "ALL_NEGATIVE"
+  | "HOLD"
+  | "";
 
 export interface StrategySignal {
-  action: "HOLD" | "BUY" | "SELL_ALL" | "ROTATE" | "REBALANCE" | "INCREASE" | "REDUCE";
+  action: "HOLD" | "BUY" | "SELL_ALL" | "ROTATE" | "REBALANCE";
   targetPositions: Partial<Record<Asset, number>>;
-  allocationMode: "SINGLE" | "REMAINDER_SPLIT" | "REMAINDER_SINGLE" | "CASH";
+  ruleTriggered: RuleTriggered;
   reason: string;
   leverage: number;
   leverageReason: string;
-  entryThreshold: number;
   topAsset: Asset | null;
-  secondBestScore: number;
-  positionType: "first" | "second" | "remainder_split" | null;
-  // Legacy fields kept for Portfolio page compatibility
   allocationMultiplier: number;
+  // Confidence
+  confidence: number;
+  confidenceZone: ConfidenceV3["zone"];
+  // Re-entry
+  reentryTriggerPrice: number;
+  reentryGapUsd: number;
+  reentryGapPct: number;
+  reentryAlreadyMet: boolean;
+  reentryRolling: Array<{ daysFromNow: number; triggerPrice: number; deltaPct: number; deltaUsd: number }>;
+  // Flags
+  rotationBlocked: boolean;
+  altBlockedRally: boolean;
+  altBlockedBreakout: boolean;
+  daysHeld: number;
+  // Legacy fields for Portfolio page compatibility
   momentumScores: Partial<Record<Asset, number>>;
   momentumRanked: Array<{ asset: Asset; score: number }>;
+  // BTC metrics (for Portfolio page)
+  btcDrawdown: number;
+  btc30dHigh: number;
+  btcRallying: boolean;
 }
 
 export interface BinanceDataResult {
   signal: StrategySignal | null;
   assets: Partial<Record<Asset, AssetMetrics>>;
-  rankedAssets: Array<{ symbol: Asset; riskAdjScore: number; rank: number }>;
-  regime: MarketRegime;
+  rankedAssets: Array<{ symbol: Asset; score: number; rank: number }>;
+  btcHealth: BtcHealth;
   confidence: ConfidenceV3;
   rawData: Partial<Record<Asset, Candle[]>>;
   loading: boolean;
@@ -152,42 +173,6 @@ function calcMA(candles: Candle[], period: number): number {
   return slice.reduce((a, c) => a + c.close, 0) / period;
 }
 
-function calcDirectionalVol(candles: Candle[], window: number) {
-  if (candles.length < window + 1) return { total: 0, upside: 0, downside: 0, ratio: 1 };
-  const slice = candles.slice(candles.length - window - 1);
-  const returns: number[] = [];
-  for (let i = 1; i < slice.length; i++) {
-    returns.push((slice[i].close - slice[i - 1].close) / slice[i - 1].close);
-  }
-  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-  const total = Math.sqrt(returns.reduce((a, r) => a + (r - mean) ** 2, 0) / returns.length);
-  const ups = returns.filter(r => r > 0);
-  const downs = returns.filter(r => r < 0);
-  const upside = ups.length >= 2 ? Math.sqrt(ups.reduce((a, r) => a + r * r, 0) / ups.length) : 0;
-  const downside = downs.length >= 2 ? Math.sqrt(downs.map(r => Math.abs(r)).reduce((a, r) => a + r * r, 0) / downs.length) : 0;
-  let ratio = 1.0;
-  if (upside < 0.001 && downside < 0.001) ratio = 1.0;
-  else if (upside < 0.001) ratio = 0.5;
-  else if (downside < 0.001) ratio = 2.0;
-  else ratio = Math.max(0.5, Math.min(2.0, upside / downside));
-  return { total, upside, downside, ratio };
-}
-
-function calcPairwiseScores(momentum30: Partial<Record<Asset, number>>): Partial<Record<Asset, number>> {
-  const assets = MAJORS.filter(a => momentum30[a] !== undefined);
-  const scores: Partial<Record<Asset, number>> = {};
-  assets.forEach(a => { scores[a] = 0; });
-  for (let i = 0; i < assets.length; i++) {
-    for (let j = i + 1; j < assets.length; j++) {
-      const a = assets[i], b = assets[j];
-      const ma = momentum30[a] ?? 0, mb = momentum30[b] ?? 0;
-      if (ma > mb) { scores[a] = (scores[a] ?? 0) + 1; scores[b] = (scores[b] ?? 0) - 1; }
-      else if (mb > ma) { scores[b] = (scores[b] ?? 0) + 1; scores[a] = (scores[a] ?? 0) - 1; }
-    }
-  }
-  return scores;
-}
-
 // ── Confidence Score v3 ────────────────────────────────────────────────────────
 
 function scoreFng(v: number, avg30d: number): number {
@@ -204,7 +189,7 @@ function scoreFng(v: number, avg30d: number): number {
   else if (trend < -20) base = Math.max(0.0, base - 0.12);
   else if (trend < -10) base = Math.max(0.0, base - 0.07);
   else if (trend < -4) base = Math.max(0.0, base - 0.03);
-  return base;
+  return Math.round(base * 10000) / 10000;
 }
 
 function scoreSth(s: number): number {
@@ -218,100 +203,239 @@ function scoreSth(s: number): number {
 }
 
 function confidenceZone(score: number): ConfidenceV3["zone"] {
-  if (score >= 0.68) return "HIGH";
-  if (score >= 0.55) return "MED-HIGH";
-  if (score >= 0.40) return "MED";
-  if (score >= 0.28) return "MED-LOW";
+  if (score >= CONF_ZONE_HIGH) return "HIGH";
+  if (score >= CONF_ZONE_MED_HIGH) return "MEDIUM-HIGH";
+  if (score >= CONF_ZONE_MED) return "MEDIUM";
+  if (score >= CONF_ZONE_MED_LOW) return "MEDIUM-LOW";
   return "LOW";
 }
 
-// ── Market Regime (proxy — mirrors composite score logic) ──────────────────────
+// ── BTC Health ────────────────────────────────────────────────────────────────
 
-function deriveRegime(btcCandles: Candle[], allMomentum14: Partial<Record<Asset, number>>): MarketRegime {
-  if (btcCandles.length < 50) return { regime: "NEUTRAL", compositeScore: 0, allocation: 0.5, entryThreshold: 10 };
-  const btcPrice = btcCandles[btcCandles.length - 1].close;
-  const ma200 = calcMA(btcCandles, Math.min(200, btcCandles.length));
-  const ma50 = calcMA(btcCandles, Math.min(50, btcCandles.length));
-  const ma20 = calcMA(btcCandles, Math.min(20, btcCandles.length));
-  const btcMom14 = allMomentum14["BTC"] ?? 0;
-  const posCount = MAJORS.filter(a => (allMomentum14[a] ?? 0) > 0).length;
-  const breadthScore = posCount / MAJORS.length;
-  let trendScore = 0;
-  if (btcPrice > ma200) trendScore += 0.4;
-  if (btcPrice > ma50) trendScore += 0.3;
-  if (btcPrice > ma20) trendScore += 0.3;
-  let momScore = 0;
-  if (btcMom14 > 5) momScore = 1.0;
-  else if (btcMom14 > 0) momScore = 0.7;
-  else if (btcMom14 > -5) momScore = 0.4;
-  else if (btcMom14 > -15) momScore = 0.2;
-  else momScore = 0.0;
-  const compositeScore = Math.round((trendScore * 0.4 + momScore * 0.35 + breadthScore * 0.25) * 1000) / 1000;
-  let regime: RegimeType;
-  if (compositeScore >= 0.75 && btcMom14 > 5) regime = "STRONG_INVEST";
-  else if (compositeScore >= 0.55) regime = "INVEST";
-  else if (compositeScore >= 0.35) regime = "NEUTRAL";
-  else if (compositeScore >= 0.20) regime = "CASH";
-  else regime = "STRONG_CASH";
-  return { regime, compositeScore, allocation: REGIME_ALLOCATION[regime], entryThreshold: ADAPTIVE_THRESHOLDS[regime] };
+function deriveBtcHealth(btcCandles: Candle[]): BtcHealth {
+  if (btcCandles.length < HIGH_LOOKBACK + 1) {
+    return { price: 0, high30d: 0, drawdownPct: 0, isRallying: false, cashTriggerStatus: "NONE", partialTriggerPrice: 0, fullTriggerPrice: 0, allocationMultiplier: 1.0 };
+  }
+  const latest = btcCandles[btcCandles.length - 1];
+  const price = latest.close;
+  const high30d = Math.max(...btcCandles.slice(-HIGH_LOOKBACK).map(c => c.high));
+  const drawdownPct = high30d > 0 ? ((high30d - price) / high30d) * 100 : 0;
+
+  // BTC rallying: made new high in last BTC_NEW_HIGH_DAYS days
+  const recentHighs = btcCandles.slice(-BTC_NEW_HIGH_DAYS);
+  const prevHigh = btcCandles.length > BTC_NEW_HIGH_DAYS
+    ? Math.max(...btcCandles.slice(-(HIGH_LOOKBACK + BTC_NEW_HIGH_DAYS), -BTC_NEW_HIGH_DAYS).map(c => c.high))
+    : 0;
+  const isRallying = recentHighs.some(c => c.close >= prevHigh);
+
+  let cashTriggerStatus: CashTriggerStatus = "NONE";
+  let allocationMultiplier = 1.0;
+  if (drawdownPct / 100 >= CASH_FULL_THRESHOLD) {
+    cashTriggerStatus = "FULL";
+    allocationMultiplier = 0.0;
+  } else if (drawdownPct / 100 >= CASH_PARTIAL_THRESHOLD) {
+    cashTriggerStatus = "PARTIAL";
+    allocationMultiplier = 0.5;
+  }
+
+  return {
+    price,
+    high30d,
+    drawdownPct,
+    isRallying,
+    cashTriggerStatus,
+    partialTriggerPrice: high30d * (1 - CASH_PARTIAL_THRESHOLD),
+    fullTriggerPrice: high30d * (1 - CASH_FULL_THRESHOLD),
+    allocationMultiplier,
+  };
 }
 
-// ── Signal generation ──────────────────────────────────────────────────────────
+// ── Re-entry trigger ──────────────────────────────────────────────────────────
+
+function calcReentry(btcCandles: Candle[]): Pick<StrategySignal, "reentryTriggerPrice" | "reentryGapUsd" | "reentryGapPct" | "reentryAlreadyMet" | "reentryRolling"> {
+  const empty = { reentryTriggerPrice: 0, reentryGapUsd: 0, reentryGapPct: 0, reentryAlreadyMet: false, reentryRolling: [] };
+  if (btcCandles.length < MOMENTUM_PERIOD + 8) return empty;
+  const currentPrice = btcCandles[btcCandles.length - 1].close;
+  // trigger = close from 30 days ago (index -(MOMENTUM_PERIOD + 1))
+  const triggerPrice = btcCandles[btcCandles.length - (MOMENTUM_PERIOD + 1)].close;
+  const gapUsd = triggerPrice - currentPrice;
+  const gapPct = (triggerPrice / currentPrice - 1) * 100;
+  const alreadyMet = gapPct <= 0;
+
+  const rolling: StrategySignal["reentryRolling"] = [];
+  for (let i = 1; i <= 7; i++) {
+    const barIdx = btcCandles.length - (MOMENTUM_PERIOD + 1) + i;
+    if (barIdx < 0 || barIdx >= btcCandles.length) continue;
+    const ft = btcCandles[barIdx].close;
+    rolling.push({
+      daysFromNow: i,
+      triggerPrice: Math.round(ft),
+      deltaUsd: Math.round(ft - currentPrice),
+      deltaPct: Math.round((ft / currentPrice - 1) * 10000) / 100,
+    });
+  }
+  return { reentryTriggerPrice: Math.round(triggerPrice), reentryGapUsd: Math.round(gapUsd), reentryGapPct: Math.round(gapPct * 100) / 100, reentryAlreadyMet: alreadyMet, reentryRolling: rolling };
+}
+
+// ── Signal generation (mirrors generate_signal + _determine_action) ───────────
 
 function buildSignal(
-  ranked: Array<{ symbol: Asset; riskAdjScore: number }>,
-  regime: MarketRegime,
+  btcHealth: BtcHealth,
+  momentum30: Partial<Record<Asset, number>>,
+  assets: Partial<Record<Asset, AssetMetrics>>,
   confidence: ConfidenceV3,
-  momentum30: Partial<Record<Asset, number>>
+  reentry: ReturnType<typeof calcReentry>
 ): StrategySignal {
-  const baseAlloc = regime.allocation;
-  const threshold = regime.entryThreshold;
-  const leverage = confidence.leverageFiring ? LEVERAGE_MULTIPLIER : 1.0;
-  const leverageReason = confidence.leverageReason;
-  const momentumScores = momentum30 as Partial<Record<Asset, number>>;
-  const momentumRanked = [...ranked].map(r => ({ asset: r.symbol, score: r.riskAdjScore }));
+  const ranked = MAJORS
+    .filter(s => momentum30[s] !== undefined)
+    .map(s => ({ symbol: s as Asset, score: momentum30[s]! }))
+    .sort((a, b) => b.score - a.score);
 
-  if (baseAlloc === 0) {
-    return { action: "SELL_ALL", targetPositions: {}, allocationMode: "CASH", reason: `${regime.regime} — exit all positions`, leverage: 1.0, leverageReason: "No leverage in cash regime", entryThreshold: threshold, topAsset: null, secondBestScore: ranked[1]?.riskAdjScore ?? 0, positionType: null, allocationMultiplier: 0, momentumScores, momentumRanked };
+  const momentumScores: Partial<Record<Asset, number>> = {};
+  ranked.forEach(r => { momentumScores[r.symbol] = r.score; });
+  const momentumRanked = ranked.map(r => ({ asset: r.symbol, score: r.score }));
+
+  const base: Omit<StrategySignal, "action" | "targetPositions" | "ruleTriggered" | "reason" | "topAsset" | "allocationMultiplier" | "rotationBlocked" | "altBlockedRally" | "altBlockedBreakout" | "daysHeld"> = {
+    leverage: 1.0,
+    leverageReason: "Leverage disabled",
+    confidence: confidence.score,
+    confidenceZone: confidence.zone,
+    ...reentry,
+    momentumScores,
+    momentumRanked,
+    btcDrawdown: btcHealth.drawdownPct / 100,
+    btc30dHigh: btcHealth.high30d,
+    btcRallying: btcHealth.isRallying,
+  };
+
+  // RULE 1: Full cash trigger
+  if (btcHealth.cashTriggerStatus === "FULL") {
+    return {
+      ...base,
+      action: "SELL_ALL",
+      targetPositions: {},
+      ruleTriggered: "CASH_FULL",
+      reason: `BTC down ${btcHealth.drawdownPct.toFixed(1)}% from 30d high — full cash`,
+      topAsset: null,
+      allocationMultiplier: 0.0,
+      rotationBlocked: false,
+      altBlockedRally: false,
+      altBlockedBreakout: false,
+      daysHeld: 0,
+    };
   }
+
+  const allocationMultiplier = btcHealth.allocationMultiplier;
+
+  // RULE 1b: Partial cash — continue to asset selection but with 50% allocation
+  const partialNote = btcHealth.cashTriggerStatus === "PARTIAL"
+    ? ` (50% allocation — partial cash trigger at ${btcHealth.drawdownPct.toFixed(1)}%)`
+    : "";
 
   if (!ranked.length) {
-    return { action: "HOLD", targetPositions: {}, allocationMode: "CASH", reason: "No assets available", leverage: 1.0, leverageReason: "", entryThreshold: threshold, topAsset: null, secondBestScore: 0, positionType: null, allocationMultiplier: baseAlloc, momentumScores, momentumRanked };
+    return {
+      ...base,
+      action: "HOLD",
+      targetPositions: {},
+      ruleTriggered: "ALL_NEGATIVE",
+      reason: "No momentum data available",
+      topAsset: null,
+      allocationMultiplier,
+      rotationBlocked: false,
+      altBlockedRally: false,
+      altBlockedBreakout: false,
+      daysHeld: 0,
+    };
   }
 
-  const top = ranked[0];
-  const second = ranked[1] ?? null;
-  const secondBestScore = second?.riskAdjScore ?? 0;
+  const bestAsset = ranked[0].symbol;
+  const bestScore = ranked[0].score;
 
-  if (top.riskAdjScore < threshold) {
-    if (regime.regime === "NEUTRAL" && second && secondBestScore >= SECOND_BEST_MIN_SCORE && (momentum30[second.symbol] ?? 0) > 0) {
-      const cap = PER_ASSET_CAPS[second.symbol];
-      const alloc = Math.min(baseAlloc * 0.8, cap);
-      return { action: "BUY", targetPositions: { [second.symbol]: alloc } as Partial<Record<Asset, number>>, allocationMode: "REMAINDER_SINGLE", reason: `${second.symbol} qualifies as second-best (${secondBestScore.toFixed(1)}) in NEUTRAL (threshold: ${SECOND_BEST_MIN_SCORE})`, leverage, leverageReason, entryThreshold: threshold, topAsset: second.symbol, secondBestScore, positionType: "second", allocationMultiplier: alloc, momentumScores, momentumRanked };
+  // RULE 3 & 4: Alt blocking (only relevant if best is not BTC)
+  if (bestAsset !== "BTC") {
+    if (btcHealth.isRallying) {
+      const btcScore = momentum30["BTC"] ?? 0;
+      return {
+        ...base,
+        action: btcScore > 0 ? "BUY" : "HOLD",
+        targetPositions: btcScore > 0 ? { BTC: allocationMultiplier } : {},
+        ruleTriggered: "BTC_RALLY",
+        reason: `BTC rallying (new high in last ${BTC_NEW_HIGH_DAYS} days) — no alts allowed${partialNote}`,
+        topAsset: btcScore > 0 ? "BTC" : null,
+        allocationMultiplier,
+        rotationBlocked: false,
+        altBlockedRally: true,
+        altBlockedBreakout: false,
+        daysHeld: 0,
+      };
     }
-    return { action: "HOLD", targetPositions: {}, allocationMode: "CASH", reason: `No qualifying positions in ${regime.regime} — top score ${top.riskAdjScore.toFixed(1)} < threshold ${threshold}`, leverage: 1.0, leverageReason: "", entryThreshold: threshold, topAsset: top.symbol, secondBestScore, positionType: null, allocationMultiplier: 0, momentumScores, momentumRanked };
-  }
 
-  const primaryCap = PER_ASSET_CAPS[top.symbol];
-  const primaryAlloc = Math.min(baseAlloc, primaryCap);
-  const targetPositions: Partial<Record<Asset, number>> = { [top.symbol]: primaryAlloc };
-  let allocationMode: StrategySignal["allocationMode"] = "REMAINDER_SINGLE";
-
-  if (primaryAlloc < baseAlloc && second && secondBestScore >= SECOND_BEST_MIN_SCORE) {
-    const remainder = baseAlloc - primaryAlloc;
-    const secondaryCap = PER_ASSET_CAPS[second.symbol];
-    const secondaryAlloc = Math.min(remainder, secondaryCap);
-    if (secondaryAlloc > 0.01) {
-      targetPositions[second.symbol] = secondaryAlloc;
-      allocationMode = "REMAINDER_SPLIT";
+    const assetMetric = assets[bestAsset];
+    const nearHigh = assetMetric?.nearHigh30 ?? false;
+    if (!nearHigh) {
+      const btcScore = momentum30["BTC"] ?? 0;
+      return {
+        ...base,
+        action: btcScore > 0 ? "BUY" : "HOLD",
+        targetPositions: btcScore > 0 ? { BTC: allocationMultiplier } : {},
+        ruleTriggered: "NO_BREAKOUT",
+        reason: `${bestAsset} not breaking out (not within ${BREAKOUT_THRESHOLD * 100}% of 30d high) — staying with BTC${partialNote}`,
+        topAsset: btcScore > 0 ? "BTC" : null,
+        allocationMultiplier,
+        rotationBlocked: false,
+        altBlockedRally: false,
+        altBlockedBreakout: true,
+        daysHeld: 0,
+      };
     }
   }
 
-  const reason = allocationMode === "REMAINDER_SPLIT"
-    ? `${top.symbol} (${(primaryAlloc * 100).toFixed(0)}%) + ${Object.keys(targetPositions)[1]} remainder split — ${regime.regime}`
-    : `${top.symbol} qualifies (score: ${top.riskAdjScore.toFixed(1)}) in ${regime.regime} (threshold: ${threshold})`;
+  // All negative
+  if (bestScore <= 0) {
+    return {
+      ...base,
+      action: "HOLD",
+      targetPositions: {},
+      ruleTriggered: "ALL_NEGATIVE",
+      reason: `All assets have negative 30-day momentum${partialNote}`,
+      topAsset: bestAsset,
+      allocationMultiplier,
+      rotationBlocked: false,
+      altBlockedRally: false,
+      altBlockedBreakout: false,
+      daysHeld: 0,
+    };
+  }
 
-  return { action: "BUY", targetPositions, allocationMode, reason, leverage, leverageReason, entryThreshold: threshold, topAsset: top.symbol, secondBestScore, positionType: allocationMode === "REMAINDER_SPLIT" ? "remainder_split" : "first", allocationMultiplier: Object.values(targetPositions).reduce((a, b) => a + (b ?? 0), 0), momentumScores, momentumRanked };
+  // Asset selected
+  const cap = PER_ASSET_CAPS[bestAsset];
+  const alloc = Math.min(allocationMultiplier, cap);
+  const targetPositions: Partial<Record<Asset, number>> = { [bestAsset]: alloc };
+
+  // Remainder split: if cap < allocationMultiplier and BTC has positive momentum
+  const remainder = allocationMultiplier - alloc;
+  if (remainder > 0.01 && bestAsset !== "BTC" && (momentum30["BTC"] ?? 0) > 0) {
+    targetPositions["BTC"] = remainder;
+  }
+
+  const ruleTriggered: RuleTriggered = bestAsset === "BTC" ? "BTC_BEST" : "ALT_BREAKOUT";
+  const reason = bestAsset === "BTC"
+    ? `BTC best momentum (${bestScore > 0 ? "+" : ""}${bestScore.toFixed(1)}%)${partialNote}`
+    : `${bestAsset} breaking out (${bestScore > 0 ? "+" : ""}${bestScore.toFixed(1)}%)${partialNote}`;
+
+  return {
+    ...base,
+    action: "BUY",
+    targetPositions,
+    ruleTriggered,
+    reason,
+    topAsset: bestAsset,
+    allocationMultiplier,
+    rotationBlocked: false,
+    altBlockedRally: false,
+    altBlockedBreakout: false,
+    daysHeld: 0,
+  };
 }
 
 // ── Fear & Greed ───────────────────────────────────────────────────────────────
@@ -322,7 +446,9 @@ async function fetchFearAndGreed(): Promise<{ current: number; avg30d: number }>
     const json = await resp.json();
     const data: Array<{ value: string }> = json.data ?? [];
     const current = parseInt(data[0]?.value ?? "50", 10);
-    const avg30d = data.length > 1 ? data.slice(0, 30).reduce((a, d) => a + parseInt(d.value, 10), 0) / Math.min(30, data.length) : current;
+    const avg30d = data.length > 1
+      ? data.slice(0, 30).reduce((a, d) => a + parseInt(d.value, 10), 0) / Math.min(30, data.length)
+      : current;
     return { current, avg30d };
   } catch {
     return { current: 50, avg30d: 50 };
@@ -331,12 +457,27 @@ async function fetchFearAndGreed(): Promise<{ current: number; avg30d: number }>
 
 // ── Main hook ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_REGIME: MarketRegime = { regime: "NEUTRAL", compositeScore: 0, allocation: 0.5, entryThreshold: 10 };
-const DEFAULT_CONF: ConfidenceV3 = { score: 0.5, zone: "MED", fngValue: 50, fng30dAvg: 50, sthRatio: 1.0, btcAbove200: false, leverageFiring: false, leverageReason: "" };
+const DEFAULT_BTC_HEALTH: BtcHealth = {
+  price: 0, high30d: 0, drawdownPct: 0, isRallying: false,
+  cashTriggerStatus: "NONE", partialTriggerPrice: 0, fullTriggerPrice: 0, allocationMultiplier: 1.0,
+};
+
+const DEFAULT_CONF: ConfidenceV3 = {
+  score: 0.5, zone: "MEDIUM", fngValue: 50, fng30dAvg: 50, sthRatio: 1.0,
+  btcAbove200: false, leverageEnabled: false, leverageFiring: false, leverageReason: "Leverage disabled",
+};
 
 export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
   const [result, setResult] = useState<BinanceDataResult>({
-    signal: null, assets: {}, rankedAssets: [], regime: DEFAULT_REGIME, confidence: DEFAULT_CONF, rawData: {}, loading: true, error: null, lastUpdated: null,
+    signal: null,
+    assets: {},
+    rankedAssets: [],
+    btcHealth: DEFAULT_BTC_HEALTH,
+    confidence: DEFAULT_CONF,
+    rawData: {},
+    loading: true,
+    error: null,
+    lastUpdated: null,
   });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -375,38 +516,35 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         const latest = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
         const mom30 = calcMomentum(candles, MOMENTUM_PERIOD);
-        const mom5 = calcMomentum(candles, 5);
-        const vol = calcDirectionalVol(candles, VOLATILITY_WINDOW);
         const ma200 = calcMA(candles, Math.min(200, candles.length));
         const ma90 = calcMA(candles, Math.min(90, candles.length));
-        const high30 = Math.max(...candles.slice(-30).map(c => c.high));
-        const drawdown = ((latest.close - high30) / high30) * 100;
-        const change24h = ((latest.close - prev.close) / prev.close) * 100;
-        const nearHigh30 = (high30 - latest.close) / high30 <= 0.05;
+        const high30 = Math.max(...candles.slice(-HIGH_LOOKBACK).map(c => c.high));
+        const drawdownFromHigh30 = ((latest.close - high30) / high30) * 100; // negative = below high
+        const change24h = prev ? ((latest.close - prev.close) / prev.close) * 100 : 0;
+        const nearHigh30 = (high30 - latest.close) / high30 <= BREAKOUT_THRESHOLD;
         momentum30[symbol] = mom30;
-        assetMetrics[symbol] = { symbol, price: latest.close, momentum30: mom30, momentum5: mom5, pairwiseScore: 0, riskAdjScore: 0, volRatio: vol.ratio, upsideVol: vol.upside, downsideVol: vol.downside, totalVol: vol.total, drawdownFromHigh30: drawdown, change24h, ma200, ma90, nearHigh30 };
+        assetMetrics[symbol] = {
+          symbol,
+          price: latest.close,
+          momentum30: mom30,
+          change24h,
+          drawdownFromHigh30,
+          nearHigh30,
+          high30,
+          ma90,
+          ma200,
+        };
       }
 
-      // Pairwise + risk-adjusted scores
-      const pairwise = calcPairwiseScores(momentum30);
-      for (const symbol of MAJORS) {
-        if (!assetMetrics[symbol]) continue;
-        const raw = pairwise[symbol] ?? 0;
-        const volRatio = assetMetrics[symbol]!.volRatio;
-        const normalised = ((raw + 4) / 8) * 20;
-        assetMetrics[symbol]!.pairwiseScore = raw;
-        assetMetrics[symbol]!.riskAdjScore = Math.round(normalised * volRatio * 10) / 10;
-      }
-
-      // Ranked
+      // Ranked by direct 30d momentum (no pairwise)
       const ranked = MAJORS
         .filter(s => assetMetrics[s])
-        .map(s => ({ symbol: s as Asset, riskAdjScore: assetMetrics[s]!.riskAdjScore }))
-        .sort((a, b) => b.riskAdjScore - a.riskAdjScore)
+        .map(s => ({ symbol: s as Asset, score: momentum30[s]! }))
+        .sort((a, b) => b.score - a.score)
         .map((a, i) => ({ ...a, rank: i + 1 }));
 
-      // Regime
-      const regime = deriveRegime(candleMap["BTC"] ?? [], momentum30);
+      // BTC health
+      const btcHealth = deriveBtcHealth(candleMap["BTC"] ?? []);
 
       // Confidence v3
       const btcCandles = candleMap["BTC"] ?? [];
@@ -416,18 +554,36 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
       const sthRatio = ma90BTC > 0 ? btcPrice / ma90BTC : 1.0;
       const btcAbove200 = btcPrice > ma200BTC;
       const confScore = Math.round((scoreFng(fng.current, fng.avg30d) * 0.55 + scoreSth(sthRatio) * 0.45) * 10000) / 10000;
-      const leverageFiring = confScore >= LEVERAGE_CONFIDENCE_THRESHOLD && btcAbove200;
-      const leverageReason = leverageFiring
-        ? `Confidence v3 ${confScore.toFixed(3)} ≥ ${LEVERAGE_CONFIDENCE_THRESHOLD} AND BTC > 200d MA`
-        : confScore < LEVERAGE_CONFIDENCE_THRESHOLD
-        ? `Confidence v3 ${confScore.toFixed(3)} < ${LEVERAGE_CONFIDENCE_THRESHOLD} threshold`
-        : "BTC below 200d MA";
-      const confidence: ConfidenceV3 = { score: confScore, zone: confidenceZone(confScore), fngValue: fng.current, fng30dAvg: fng.avg30d, sthRatio, btcAbove200, leverageFiring, leverageReason };
+      // Leverage disabled in v7.0 Conservative
+      const confidence: ConfidenceV3 = {
+        score: confScore,
+        zone: confidenceZone(confScore),
+        fngValue: fng.current,
+        fng30dAvg: fng.avg30d,
+        sthRatio,
+        btcAbove200,
+        leverageEnabled: LEVERAGE_ENABLED,
+        leverageFiring: false,
+        leverageReason: "Leverage disabled in v7.0 Conservative",
+      };
+
+      // Re-entry trigger
+      const reentry = calcReentry(btcCandles);
 
       // Signal
-      const signal = buildSignal(ranked, regime, confidence, momentum30);
+      const signal = buildSignal(btcHealth, momentum30, assetMetrics, confidence, reentry);
 
-      setResult({ signal, assets: assetMetrics, rankedAssets: ranked, regime, confidence, rawData: candleMap, loading: false, error: null, lastUpdated: new Date() });
+      setResult({
+        signal,
+        assets: assetMetrics,
+        rankedAssets: ranked,
+        btcHealth,
+        confidence,
+        rawData: candleMap,
+        loading: false,
+        error: null,
+        lastUpdated: new Date(),
+      });
     } catch (err: any) {
       setResult(prev => ({ ...prev, loading: false, error: err?.message ?? "Fetch error" }));
     }
