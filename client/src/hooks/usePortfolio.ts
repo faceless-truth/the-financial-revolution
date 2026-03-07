@@ -11,7 +11,7 @@
  */
 
 import { useMemo } from "react";
-import type { OHLCVRow, StrategySignal } from "./useBinanceData";
+import type { Candle, StrategySignal } from "./useBinanceData";
 
 export interface TradeEntry {
   date: string;
@@ -104,19 +104,19 @@ function todayUTC(): string {
 }
 
 /**
- * Determine if the 00:30 UTC execution window has passed today.
- * If current UTC time >= 00:30, today's signal can be applied.
+ * Determine if the 00:05 UTC execution window has passed today.
+ * If current UTC time >= 00:05, today's signal can be applied.
  */
 function executionWindowPassedToday(): boolean {
   const now = new Date();
   const utcHour = now.getUTCHours();
   const utcMin = now.getUTCMinutes();
-  return utcHour > 0 || (utcHour === 0 && utcMin >= 30);
+  return utcHour > 0 || (utcHour === 0 && utcMin >= 5);
 }
 
 export function usePortfolio(
   signal: StrategySignal | null,
-  rawData: Partial<Record<Asset, OHLCVRow[]>>
+  rawData: Partial<Record<Asset, Candle[]>>
 ): PortfolioState {
   const portfolio = useMemo<PortfolioState>(() => {
     const today = todayUTC();

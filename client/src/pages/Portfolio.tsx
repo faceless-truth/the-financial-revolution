@@ -4,7 +4,7 @@
  *
  * Day 1 starts today with $50,000 cash.
  * State persists in localStorage and grows forward day by day.
- * Each day at 00:30 UTC the strategy signal is applied.
+ * Each day at 00:05 UTC the strategy signal is applied.
  */
 
 import { useBinanceData } from "@/hooks/useBinanceData";
@@ -228,7 +228,7 @@ export default function Portfolio() {
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 You are holding <span className="text-white font-semibold">$50,000 cash</span>. The first execution window is at{" "}
-                <span className="text-white font-semibold mono-data">00:30 UTC</span> — that's in{" "}
+                <span className="text-white font-semibold mono-data">00:05 UTC</span> — that's in{" "}
                 <span className="font-semibold" style={{ color: "oklch(0.75 0.22 255)" }}>
                   {hoursToNext}h {minsToNext}m
                 </span>. After that, the strategy signal will be applied and the equity curve will begin growing.
@@ -267,7 +267,7 @@ export default function Portfolio() {
               <StatCard
                 label="Next Execution"
                 value={hoursToNext !== null ? `${hoursToNext}h ${minsToNext}m` : "—"}
-                sub="Daily close → 00:30 UTC"
+                sub="Daily close → 00:05 UTC"
                 color="oklch(0.60 0.22 255)"
                 icon={<Clock size={14} />}
               />
@@ -317,7 +317,7 @@ export default function Portfolio() {
               <div className="text-center">
                 <p className="text-sm font-semibold text-foreground/70">Equity curve starts after first execution</p>
                 <p className="text-xs text-muted-foreground/50 mt-1">
-                  Come back after <span className="font-semibold mono-data text-foreground/60">00:30 UTC</span> to see your first data point
+                  Come back after <span className="font-semibold mono-data text-foreground/60">00:05 UTC</span> to see your first data point
                 </p>
               </div>
               {/* Single Day 1 dot preview */}
@@ -407,7 +407,7 @@ export default function Portfolio() {
                     <p className="text-xs text-muted-foreground">
                       {portfolio.currentAsset === "CASH"
                         ? isDay1
-                          ? "Day 1 — awaiting first 00:30 UTC execution"
+                          ? "Day 1 — awaiting first 00:05 UTC execution"
                           : "Fully in cash — awaiting re-entry signal"
                         : `${portfolio.currentUnits.toFixed(6)} units @ ${formatPrice(portfolio.entryPrice)}`}
                     </p>
@@ -510,7 +510,7 @@ export default function Portfolio() {
                       <div className="flex items-start gap-2">
                         <CheckCircle size={14} className="text-emerald-400 mt-0.5 shrink-0" />
                         <p className="text-sm text-foreground/80">
-                          Stay in cash. No action required at 00:30 UTC.
+                          Stay in cash. No action required at 00:05 UTC.
                         </p>
                       </div>
                     )}
@@ -527,9 +527,9 @@ export default function Portfolio() {
                       <div className="flex items-start gap-2">
                         <ArrowUpRight size={14} className="text-emerald-400 mt-0.5 shrink-0" />
                         <p className="text-sm text-foreground/80">
-                          <span className="font-semibold text-emerald-300">Buy signal.</span> At 00:30 UTC, deploy{" "}
+                          <span className="font-semibold text-emerald-300">Buy signal.</span> At 00:05 UTC, deploy{" "}
                           <span className="font-semibold mono-data text-white">
-                            {formatLargeNumber(portfolio.cashBalance * (signal.allocationMultiplier ?? 1))}
+                            {formatLargeNumber(portfolio.cashBalance * (Object.values(signal.targetPositions).reduce((a, b) => a + (b ?? 0), 0) || 1))}
                           </span>{" "}
                           into {Object.keys(signal.targetPositions).join(", ") || "BTC"}.
                         </p>
@@ -547,7 +547,7 @@ export default function Portfolio() {
                       <div className="flex items-start gap-2">
                         <AlertTriangle size={14} className="text-red-400 mt-0.5 shrink-0" />
                         <p className="text-sm text-foreground/80">
-                          <span className="font-semibold text-red-300">Cash trigger hit.</span> At 00:30 UTC, sell all positions and move to 100% cash.
+                          <span className="font-semibold text-red-300">Cash trigger hit.</span> At 00:05 UTC, sell all positions and move to 100% cash.
                         </p>
                       </div>
                     )}
@@ -561,7 +561,7 @@ export default function Portfolio() {
                     <span className="text-xs text-muted-foreground">Next execution window</span>
                   </div>
                   <span className="text-sm font-bold mono-data" style={{ color: "oklch(0.60 0.22 255)", fontFamily: "Syne, sans-serif" }}>
-                    {hoursToNext !== null ? `${hoursToNext}h ${minsToNext}m` : "—"} · 00:30 UTC
+                    {hoursToNext !== null ? `${hoursToNext}h ${minsToNext}m` : "—"} · 00:05 UTC
                   </span>
                 </div>
 
@@ -609,10 +609,10 @@ export default function Portfolio() {
               <p className="font-semibold">No trades yet — Day 1</p>
               <p className="text-xs mt-1 text-muted-foreground/50">
                 {signal?.action === "HOLD"
-                  ? "Today's signal is HOLD — strategy stays in cash at 00:30 UTC."
+                  ? "Today's signal is HOLD — strategy stays in cash at 00:05 UTC."
                   : signal?.action === "BUY"
-                  ? `Today's signal is BUY — a trade will be logged at 00:30 UTC.`
-                  : "Trades will appear here after the first 00:30 UTC execution."}
+                  ? `Today's signal is BUY — a trade will be logged at 00:05 UTC.`
+                  : "Trades will appear here after the first 00:05 UTC execution."}
               </p>
             </div>
           ) : (
@@ -668,7 +668,7 @@ export default function Portfolio() {
         <footer className="border-t border-border/20 pt-4 pb-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/40">
             <p>The Financial Revolution · Portfolio tracking based on live Binance data · Not financial advice</p>
-            <p className="mono-data">Execution at 00:30 UTC daily · State persists across sessions</p>
+            <p className="mono-data">Execution at 00:05 UTC daily · State persists across sessions</p>
           </div>
         </footer>
       </div>
