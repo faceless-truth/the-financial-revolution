@@ -134,8 +134,8 @@ export default function Portfolio() {
 
   const assetColor = ASSET_COLORS[portfolio.currentAsset] ?? "oklch(0.55 0.010 260)";
 
-  // Is this genuinely Day 1 (only one equity point)?
-  const isDay1 = portfolio.equityCurve.length <= 1;
+  // isDay1: true only if we have exactly one equity point AND it's cash (no trade applied yet)
+  const isDay1 = portfolio.equityCurve.length <= 1 && portfolio.currentAsset === "CASH" && portfolio.tradeLog.length === 0;
 
   return (
     <div className="min-h-screen" style={{ background: "oklch(0.10 0.010 260)" }}>
@@ -227,11 +227,8 @@ export default function Portfolio() {
                 Day 1 — Portfolio started today, {portfolio.startDate}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                You are holding <span className="text-white font-semibold">$50,000 cash</span>. The first execution window is at{" "}
-                <span className="text-white font-semibold mono-data">00:05 UTC</span> — that's in{" "}
-                <span className="font-semibold" style={{ color: "oklch(0.75 0.22 255)" }}>
-                  {hoursToNext}h {minsToNext}m
-                </span>. After that, the strategy signal will be applied and the equity curve will begin growing.
+                $50,000 cash deployed. The strategy signal will be applied at the next{" "}
+                <span className="text-white font-semibold mono-data">00:05 UTC</span> daily close window.
               </p>
             </div>
           </div>
@@ -406,9 +403,7 @@ export default function Portfolio() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {portfolio.currentAsset === "CASH"
-                        ? isDay1
-                          ? "Day 1 — awaiting first 00:05 UTC execution"
-                          : "Fully in cash — awaiting re-entry signal"
+                        ? "Fully in cash — awaiting re-entry signal"
                         : `${portfolio.currentUnits.toFixed(6)} units @ ${formatPrice(portfolio.entryPrice)}`}
                     </p>
                   </div>
@@ -606,12 +601,12 @@ export default function Portfolio() {
             <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
           ) : portfolio.tradeLog.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground text-sm">
-              <p className="font-semibold">No trades yet — Day 1</p>
+              <p className="font-semibold">No trades yet</p>
               <p className="text-xs mt-1 text-muted-foreground/50">
                 {signal?.action === "HOLD"
-                  ? "Today's signal is HOLD — strategy stays in cash at 00:05 UTC."
+                  ? "Today's signal is HOLD — strategy stays in cash."
                   : signal?.action === "BUY"
-                  ? `Today's signal is BUY — a trade will be logged at 00:05 UTC.`
+                  ? `Today's signal is BUY — first trade will execute at 00:05 UTC.`
                   : "Trades will appear here after the first 00:05 UTC execution."}
               </p>
             </div>

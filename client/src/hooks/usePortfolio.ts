@@ -62,7 +62,7 @@ export interface PortfolioState {
 
 const STARTING_CAPITAL = 50_000;
 const MIN_HOLD_DAYS = 14;
-const STORAGE_KEY = "tfr_portfolio_v1";
+const STORAGE_KEY = "tfr_portfolio_v2";
 
 type Asset = "BTC" | "ETH" | "SOL" | "SUI" | "DOGE";
 
@@ -83,9 +83,26 @@ interface PersistedPortfolio {
 
 function loadPersistedPortfolio(): PersistedPortfolio | null {
   try {
+    // Migrate from v1 if present
+    const v1 = localStorage.getItem("tfr_portfolio_v1");
+    if (v1) {
+      const parsed = JSON.parse(v1) as PersistedPortfolio;
+      // If v1 was stuck in cash with no trades, reset lastProcessedDate so signal fires immediately
+      if (parsed.heldAsset === "CASH" && parsed.tradeLog.length === 0) {
+        parsed.lastProcessedDate = yesterdayUTC();
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+      localStorage.removeItem("tfr_portfolio_v1");
+      return parsed;
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as PersistedPortfolio;
+    const parsed = JSON.parse(raw) as PersistedPortfolio;
+    // Safety: if stuck in cash with no trades and lastProcessedDate is today, reset it
+    if (parsed.heldAsset === "CASH" && parsed.tradeLog.length === 0 && parsed.lastProcessedDate === todayUTC()) {
+      parsed.lastProcessedDate = yesterdayUTC();
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -103,16 +120,13 @@ function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/**
- * Determine if the 00:05 UTC execution window has passed today.
- * If current UTC time >= 00:05, today's signal can be applied.
- */
-function executionWindowPassedToday(): boolean {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const utcMin = now.getUTCMinutes();
-  return utcHour > 0 || (utcHour === 0 && utcMin >= 5);
+function yesterdayUTC(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
+
+// Execution window check removed — signal is always valid once computed from daily close.
 
 export function usePortfolio(
   signal: StrategySignal | null,
@@ -147,16 +161,15 @@ export function usePortfolio(
             asset: "CASH",
           },
         ],
-        lastProcessedDate: today,
+        lastProcessedDate: yesterdayUTC(), // set to yesterday so signal is applied immediately on Day 1
       };
       savePersistedPortfolio(persisted);
     }
 
-    // ── Apply today's signal if execution window has passed and not yet applied ─
+    // ── Apply today's signal if not yet applied today ─────────────────────────
     if (
       signal &&
       btcCurrentPrice > 0 &&
-      executionWindowPassedToday() &&
       persisted.lastProcessedDate !== today
     ) {
       // Determine target from signal
@@ -290,10 +303,10 @@ export function usePortfolio(
 
     const minHoldDaysRemaining = Math.max(0, MIN_HOLD_DAYS - persisted.daysHeld);
 
-    // Next 00:30 UTC
+    // Next 00:05 UTC
     const now = new Date();
     const nextExec = new Date(now);
-    nextExec.setUTCHours(0, 30, 0, 0);
+    nextExec.setUTCHours(0, 5, 0, 0);
     if (nextExec <= now) nextExec.setUTCDate(nextExec.getUTCDate() + 1);
 
     const outperformanceUsd = currentValue - btcHoldValue;
