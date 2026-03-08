@@ -60,11 +60,11 @@ export interface PortfolioState {
   loading: boolean;
 }
 
-const STARTING_CAPITAL = 65_700;
+const STARTING_CAPITAL = 71_400;
 const ACTUAL_ENTRY_PRICE = 67_000;  // Actual BTC purchase price on Day 1
 const ACTUAL_ENTRY_DATE = "2026-03-08"; // Actual purchase date
 const MIN_HOLD_DAYS = 14;
-const STORAGE_KEY = "tfr_portfolio_v3";
+const STORAGE_KEY = "tfr_portfolio_v4";
 
 type Asset = "BTC" | "ETH" | "SOL" | "SUI" | "DOGE";
 
@@ -85,9 +85,10 @@ interface PersistedPortfolio {
 
 function loadPersistedPortfolio(): PersistedPortfolio | null {
   try {
-    // Clear any old versions — v3 is a fresh start with actual trade data
+    // Clear any old versions — v4 is a fresh start with actual trade data
     localStorage.removeItem("tfr_portfolio_v1");
     localStorage.removeItem("tfr_portfolio_v2");
+    localStorage.removeItem("tfr_portfolio_v3");
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as PersistedPortfolio;

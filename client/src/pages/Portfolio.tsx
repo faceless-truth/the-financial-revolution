@@ -2,7 +2,7 @@
  * Portfolio — Real Forward-Tracking Portfolio
  * Design: Dark Precision — same system as main dashboard
  *
- * Day 1 starts today with $65,700 capital.
+ * Day 1 starts today with $71,400 capital.
  * State persists in localStorage and grows forward day by day.
  * Each day at 00:05 UTC the strategy signal is applied.
  */
@@ -162,7 +162,7 @@ export default function Portfolio() {
                   My Portfolio
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  Started {portfolio.startDate} · Day {portfolio.daysTracked} · $65,700 capital
+                  Started {portfolio.startDate} · Day {portfolio.daysTracked} · $71,400 capital
                 </p>
               </div>
             </div>
@@ -178,7 +178,7 @@ export default function Portfolio() {
             {/* Reset button */}
             <button
               onClick={() => {
-                if (confirm("Reset portfolio back to Day 1 ($65,700 capital)? This cannot be undone.")) {
+                if (confirm("Reset portfolio back to Day 1 ($71,400 capital)? This cannot be undone.")) {
                   resetPortfolio();
                 }
               }}
@@ -227,7 +227,7 @@ export default function Portfolio() {
                 Day 1 — Portfolio started today, {portfolio.startDate}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                $65,700 capital deployed. The strategy signal will be applied at the next{" "}
+                $71,400 capital deployed. The strategy signal will be applied at the next{" "}
                 <span className="text-white font-semibold mono-data">00:05 UTC</span> daily close window.
               </p>
             </div>
@@ -282,7 +282,7 @@ export default function Portfolio() {
                   Equity Curve
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Strategy vs BTC buy-and-hold · Starting {portfolio.startDate} · $65,700 capital
+                  Strategy vs BTC buy-and-hold · Starting {portfolio.startDate} · $71,400 capital
                 </p>
               </div>
             </div>
@@ -321,7 +321,7 @@ export default function Portfolio() {
               <div className="flex items-center gap-2 px-4 py-2 rounded-lg border" style={{ background: "oklch(0.72 0.18 155 / 8%)", borderColor: "oklch(0.72 0.18 155 / 20%)" }}>
                 <span className="w-2 h-2 rounded-full" style={{ background: "oklch(0.72 0.18 155)" }} />
                 <span className="text-xs mono-data" style={{ color: "oklch(0.72 0.18 155)" }}>
-                  Day 1 · {portfolio.startDate} · $65,700.00
+                  Day 1 · {portfolio.startDate} · $71,400.00
                 </span>
               </div>
             </div>
@@ -361,7 +361,7 @@ export default function Portfolio() {
                   y={portfolio.startingCapital}
                   stroke="oklch(1 0 0 / 20%)"
                   strokeDasharray="4 2"
-                  label={{ value: "$65.7k start", position: "insideTopLeft", fill: "oklch(0.55 0.010 260)", fontSize: 10 }}
+                  label={{ value: "$71.4k start", position: "insideTopLeft", fill: "oklch(0.55 0.010 260)", fontSize: 10 }}
                 />
                 <Tooltip content={<EquityTooltip />} />
                 <Area type="monotone" dataKey="btcHoldValue" stroke="oklch(0.78 0.18 75)" strokeWidth={1.5} fill="url(#btcGrad)" strokeOpacity={0.7} dot={false} />
