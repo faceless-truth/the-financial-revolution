@@ -60,9 +60,11 @@ export interface PortfolioState {
   loading: boolean;
 }
 
-const STARTING_CAPITAL = 50_000;
+const STARTING_CAPITAL = 65_700;
+const ACTUAL_ENTRY_PRICE = 67_000;  // Actual BTC purchase price on Day 1
+const ACTUAL_ENTRY_DATE = "2026-03-08"; // Actual purchase date
 const MIN_HOLD_DAYS = 14;
-const STORAGE_KEY = "tfr_portfolio_v2";
+const STORAGE_KEY = "tfr_portfolio_v3";
 
 type Asset = "BTC" | "ETH" | "SOL" | "SUI" | "DOGE";
 
@@ -83,26 +85,12 @@ interface PersistedPortfolio {
 
 function loadPersistedPortfolio(): PersistedPortfolio | null {
   try {
-    // Migrate from v1 if present
-    const v1 = localStorage.getItem("tfr_portfolio_v1");
-    if (v1) {
-      const parsed = JSON.parse(v1) as PersistedPortfolio;
-      // If v1 was stuck in cash with no trades, reset lastProcessedDate so signal fires immediately
-      if (parsed.heldAsset === "CASH" && parsed.tradeLog.length === 0) {
-        parsed.lastProcessedDate = yesterdayUTC();
-      }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-      localStorage.removeItem("tfr_portfolio_v1");
-      return parsed;
-    }
+    // Clear any old versions — v3 is a fresh start with actual trade data
+    localStorage.removeItem("tfr_portfolio_v1");
+    localStorage.removeItem("tfr_portfolio_v2");
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedPortfolio;
-    // Safety: if stuck in cash with no trades and lastProcessedDate is today, reset it
-    if (parsed.heldAsset === "CASH" && parsed.tradeLog.length === 0 && parsed.lastProcessedDate === todayUTC()) {
-      parsed.lastProcessedDate = yesterdayUTC();
-    }
-    return parsed;
+    return JSON.parse(raw) as PersistedPortfolio;
   } catch {
     return null;
   }
@@ -141,27 +129,41 @@ export function usePortfolio(
     let persisted = loadPersistedPortfolio();
 
     if (!persisted) {
-      // Day 1 — first ever visit. Initialise with today's BTC price for comparison.
+      // Day 1 — seed with actual trade: BTC purchased at ACTUAL_ENTRY_PRICE on ACTUAL_ENTRY_DATE
+      const btcUnits = STARTING_CAPITAL / ACTUAL_ENTRY_PRICE;
+      const initialValue = btcUnits * (btcCurrentPrice > 0 ? btcCurrentPrice : ACTUAL_ENTRY_PRICE);
+      const btcHoldValueDay1 = STARTING_CAPITAL; // same as starting capital since we bought BTC on Day 1
       persisted = {
-        startDate: today,
-        btcStartPrice: btcCurrentPrice,
-        cash: STARTING_CAPITAL,
-        heldAsset: "CASH",
-        heldUnits: 0,
-        entryPrice: 0,
-        entryDate: "",
+        startDate: ACTUAL_ENTRY_DATE,
+        btcStartPrice: ACTUAL_ENTRY_PRICE, // BTC price we paid — used for buy-and-hold comparison
+        cash: 0,                           // fully invested
+        heldAsset: "BTC",
+        heldUnits: btcUnits,
+        entryPrice: ACTUAL_ENTRY_PRICE,
+        entryDate: ACTUAL_ENTRY_DATE,
         daysHeld: 0,
-        tradeLog: [],
-        equityCurve: [
+        tradeLog: [
           {
-            date: today,
-            value: STARTING_CAPITAL,
-            btcHoldValue: STARTING_CAPITAL,
-            inCash: true,
-            asset: "CASH",
+            date: ACTUAL_ENTRY_DATE,
+            action: "BUY",
+            asset: "BTC",
+            price: ACTUAL_ENTRY_PRICE,
+            units: btcUnits,
+            valueUsd: STARTING_CAPITAL,
+            reason: "Strategy signal: BUY BTC 100% — 30d momentum positive, breakout confirmed",
+            portfolioValueAfter: initialValue,
           },
         ],
-        lastProcessedDate: yesterdayUTC(), // set to yesterday so signal is applied immediately on Day 1
+        equityCurve: [
+          {
+            date: ACTUAL_ENTRY_DATE,
+            value: STARTING_CAPITAL,
+            btcHoldValue: btcHoldValueDay1,
+            inCash: false,
+            asset: "BTC",
+          },
+        ],
+        lastProcessedDate: today, // already applied — don't re-process today
       };
       savePersistedPortfolio(persisted);
     }
