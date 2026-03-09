@@ -524,6 +524,137 @@ export default function Home() {
           ) : null}
         </div>
 
+        {/* ── CASH TRIGGER LEVELS ────────────────────────────────────────────── */}
+        {btcHealth.high30d > 0 && (
+          <div className="panel p-5">
+            <SectionHeader
+              icon={<AlertTriangle size={14} />}
+              title="Cash Trigger Levels"
+              subtitle={`BTC must close below these prices to trigger a forced exit — based on 30d high of ${formatPrice(btcHealth.high30d)}`}
+            />
+            <div className="space-y-3 mt-1">
+
+              {/* Partial trigger row */}
+              {(() => {
+                const partialPrice = btcHealth.partialTriggerPrice;
+                const fullPrice = btcHealth.fullTriggerPrice;
+                const currentPrice = btcHealth.price;
+                const partialGap = currentPrice - partialPrice;
+                const fullGap = currentPrice - fullPrice;
+                const partialTriggered = btcHealth.cashTriggerStatus === "PARTIAL" || btcHealth.cashTriggerStatus === "FULL";
+                const fullTriggered = btcHealth.cashTriggerStatus === "FULL";
+
+                return (
+                  <>
+                    {/* Partial — 50% cash */}
+                    <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                      partialTriggered
+                        ? "border-amber-500/50 bg-amber-500/10"
+                        : "border-border/25 bg-card/30"
+                    }`}>
+                      <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex flex-col items-center justify-center ${
+                        partialTriggered ? "bg-amber-500/20" : "bg-muted/30"
+                      }`}>
+                        <span className={`text-xs font-bold ${partialTriggered ? "text-amber-400" : "text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>50%</span>
+                        <span className={`text-[9px] ${partialTriggered ? "text-amber-400/70" : "text-muted-foreground/50"}`}>CASH</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-lg font-bold mono-data ${partialTriggered ? "text-amber-400" : "text-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                            {formatPrice(partialPrice)}
+                          </span>
+                          {partialTriggered ? (
+                            <span className="text-xs font-semibold text-amber-400 uppercase tracking-wide">TRIGGERED</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground mono-data">
+                              {formatPrice(partialGap)} away
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          BTC 12% below 30d high · Half position sold, 50% moved to cash
+                        </p>
+                        {/* Gap bar */}
+                        {!partialTriggered && (
+                          <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: "oklch(1 0 0 / 8%)" }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-700"
+                              style={{
+                                width: `${Math.min(100, Math.max(0, (1 - partialGap / (btcHealth.high30d - partialPrice)) * 100))}%`,
+                                background: "oklch(0.78 0.18 75)",
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs text-muted-foreground">−12% from high</p>
+                        <p className={`text-sm font-bold mono-data mt-0.5 ${partialTriggered ? "text-amber-400" : "text-muted-foreground/60"}`}>
+                          {partialTriggered ? "ACTIVE" : `${((partialGap / currentPrice) * 100).toFixed(1)}% buffer`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Full — 100% cash */}
+                    <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                      fullTriggered
+                        ? "border-red-500/50 bg-red-500/10"
+                        : "border-border/25 bg-card/30"
+                    }`}>
+                      <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex flex-col items-center justify-center ${
+                        fullTriggered ? "bg-red-500/20" : "bg-muted/30"
+                      }`}>
+                        <span className={`text-xs font-bold ${fullTriggered ? "text-red-400" : "text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>100%</span>
+                        <span className={`text-[9px] ${fullTriggered ? "text-red-400/70" : "text-muted-foreground/50"}`}>CASH</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-lg font-bold mono-data ${fullTriggered ? "text-red-400" : "text-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                            {formatPrice(fullPrice)}
+                          </span>
+                          {fullTriggered ? (
+                            <span className="text-xs font-semibold text-red-400 uppercase tracking-wide">TRIGGERED</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground mono-data">
+                              {formatPrice(fullGap)} away
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          BTC 25% below 30d high · Full exit — 100% moved to cash, overrides hold period
+                        </p>
+                        {/* Gap bar */}
+                        {!fullTriggered && (
+                          <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: "oklch(1 0 0 / 8%)" }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-700"
+                              style={{
+                                width: `${Math.min(100, Math.max(0, (1 - fullGap / (btcHealth.high30d - fullPrice)) * 100))}%`,
+                                background: "oklch(0.62 0.22 25)",
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs text-muted-foreground">−25% from high</p>
+                        <p className={`text-sm font-bold mono-data mt-0.5 ${fullTriggered ? "text-red-400" : "text-muted-foreground/60"}`}>
+                          {fullTriggered ? "ACTIVE" : `${((fullGap / currentPrice) * 100).toFixed(1)}% buffer`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Summary note */}
+                    <p className="text-xs text-muted-foreground/50 text-center pt-1">
+                      30d high resets daily · triggers recalculate each candle close at 00:05 UTC
+                    </p>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* ── ROW 3: Confidence v3 ─────────────────────────────────────────────── */}
         <div className="panel p-5">
           <SectionHeader icon={<Gauge size={14} />} title="Confidence Score v3" subtitle="F&G 55% + STH Proxy (BTC / 90d MA) 45% — leverage gate disabled in v7.0 Conservative" />
