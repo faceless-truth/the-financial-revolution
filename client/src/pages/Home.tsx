@@ -23,9 +23,10 @@ import {
   formatPct,
   timeAgo,
 } from "@/lib/formatters";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge } from "lucide-react";
+import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge, Bell, BellOff } from "lucide-react";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/dashboard-hero-bg-hgsqEWzXFhZWuFZbadExQL.webp";
 
@@ -143,10 +144,26 @@ function ConfidenceBar({ score, zone }: { score: number; zone: string }) {
 export default function Home() {
   const { signal, assets, rankedAssets, btcHealth, confidence, rawData, loading, error, lastUpdated } = useBinanceData(5 * 60 * 1000);
   const [, setTick] = useState(0);
+  const { status: notifStatus, isSubscribed, storedSignal, subscribe, unsubscribe, reportSignalChange } = usePushNotifications();
+  const prevSignalRef = useRef<string | null>(null);
+
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // Detect signal changes and notify backend
+  useEffect(() => {
+    if (!signal) return;
+    const currentAction = signal.action;
+    // Compare with stored backend signal (source of truth for notifications)
+    if (storedSignal && storedSignal.action !== currentAction) {
+      reportSignalChange(currentAction, signal.ruleTriggered ?? null, signal.reason);
+    } else if (!storedSignal && prevSignalRef.current && prevSignalRef.current !== currentAction) {
+      reportSignalChange(currentAction, signal.ruleTriggered ?? null, signal.reason);
+    }
+    prevSignalRef.current = currentAction;
+  }, [signal?.action, storedSignal, reportSignalChange]);
 
   const btcAsset = assets["BTC"];
   const btcPrice = btcHealth.price;
@@ -187,6 +204,23 @@ export default function Home() {
               <span>{lastUpdated ? timeAgo(lastUpdated) : "Loading..."}</span>
             </div>
             {signal && <SignalBadge action={signal.action} />}
+            {/* Notification bell */}
+            {notifStatus !== "unsupported" && (
+              <button
+                onClick={isSubscribed ? unsubscribe : subscribe}
+                title={isSubscribed ? "Disable push notifications" : "Enable push notifications"}
+                className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/40 transition-all hover:border-primary/40"
+                style={{ background: isSubscribed ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.13 0.012 260)" }}
+              >
+                {notifStatus === "loading" ? (
+                  <RefreshCw size={14} className="animate-spin text-muted-foreground" />
+                ) : isSubscribed ? (
+                  <Bell size={14} className="text-emerald-400" />
+                ) : (
+                  <BellOff size={14} className="text-muted-foreground/50" />
+                )}
+              </button>
+            )}
           </div>
         </div>
       </header>
