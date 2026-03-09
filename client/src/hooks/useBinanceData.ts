@@ -146,6 +146,18 @@ export interface StrategySignal {
   btcRallying: boolean;
 }
 
+export interface ReentryRow {
+  symbol: Asset;
+  icon: string;
+  currentPrice: number;
+  triggerToday: number;      // price 30 days ago (today's trigger)
+  triggerTomorrow: number;   // price 29 days ago (tomorrow's trigger)
+  metToday: boolean;
+  metTomorrow: boolean;
+  gapTodayPct: number;       // negative = already met
+  gapTomorrowPct: number;
+}
+
 export interface BinanceDataResult {
   signal: StrategySignal | null;
   assets: Partial<Record<Asset, AssetMetrics>>;
@@ -153,6 +165,7 @@ export interface BinanceDataResult {
   btcHealth: BtcHealth;
   confidence: ConfidenceV3;
   rawData: Partial<Record<Asset, Candle[]>>;
+  reentryTable: ReentryRow[];  // 2-day rolling trigger for all 5 assets
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;
@@ -455,6 +468,51 @@ async function fetchFearAndGreed(): Promise<{ current: number; avg30d: number }>
   }
 }
 
+// ── Asset icons ──────────────────────────────────────────────────────────────
+const ASSET_ICONS_MAP: Record<Asset, string> = {
+  BTC: "₿", ETH: "Ξ", SOL: "◎", SUI: "🌊", DOGE: "Ð",
+};
+
+// ── Per-asset 2-day re-entry table ────────────────────────────────────────────
+function calcReentryTable(candleMap: Partial<Record<Asset, Candle[]>>): ReentryRow[] {
+  return MAJORS.map((symbol) => {
+    const candles = candleMap[symbol];
+    if (!candles || candles.length < MOMENTUM_PERIOD + 2) {
+      return {
+        symbol,
+        icon: ASSET_ICONS_MAP[symbol],
+        currentPrice: 0,
+        triggerToday: 0,
+        triggerTomorrow: 0,
+        metToday: false,
+        metTomorrow: false,
+        gapTodayPct: 0,
+        gapTomorrowPct: 0,
+      };
+    }
+    const currentPrice = candles[candles.length - 1].close;
+    // Today's trigger = close from exactly 30 days ago
+    const triggerToday = candles[candles.length - 1 - MOMENTUM_PERIOD].close;
+    // Tomorrow's trigger = close from 29 days ago (the window shifts forward 1 day)
+    const triggerTomorrow = candles[candles.length - MOMENTUM_PERIOD].close;
+    const metToday = currentPrice >= triggerToday;
+    const metTomorrow = currentPrice >= triggerTomorrow;
+    const gapTodayPct = ((triggerToday - currentPrice) / currentPrice) * 100;
+    const gapTomorrowPct = ((triggerTomorrow - currentPrice) / currentPrice) * 100;
+    return {
+      symbol,
+      icon: ASSET_ICONS_MAP[symbol],
+      currentPrice,
+      triggerToday,
+      triggerTomorrow,
+      metToday,
+      metTomorrow,
+      gapTodayPct: Math.round(gapTodayPct * 100) / 100,
+      gapTomorrowPct: Math.round(gapTomorrowPct * 100) / 100,
+    };
+  });
+}
+
 // ── Main hook ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_BTC_HEALTH: BtcHealth = {
@@ -475,6 +533,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
     btcHealth: DEFAULT_BTC_HEALTH,
     confidence: DEFAULT_CONF,
     rawData: {},
+    reentryTable: [],
     loading: true,
     error: null,
     lastUpdated: null,
@@ -570,6 +629,9 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
       // Re-entry trigger
       const reentry = calcReentry(btcCandles);
 
+      // Per-asset 2-day re-entry table
+      const reentryTable = calcReentryTable(candleMap);
+
       // Signal
       const signal = buildSignal(btcHealth, momentum30, assetMetrics, confidence, reentry);
 
@@ -580,6 +642,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         btcHealth,
         confidence,
         rawData: candleMap,
+        reentryTable,
         loading: false,
         error: null,
         lastUpdated: new Date(),

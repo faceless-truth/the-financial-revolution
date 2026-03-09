@@ -142,7 +142,7 @@ function ConfidenceBar({ score, zone }: { score: number; zone: string }) {
 
 // ── Main dashboard ─────────────────────────────────────────────────────────────
 export default function Home() {
-  const { signal, assets, rankedAssets, btcHealth, confidence, rawData, loading, error, lastUpdated } = useBinanceData(5 * 60 * 1000);
+  const { signal, assets, rankedAssets, btcHealth, confidence, rawData, reentryTable, loading, error, lastUpdated } = useBinanceData(5 * 60 * 1000);
   const [, setTick] = useState(0);
   const { status: notifStatus, isSubscribed, storedSignal, subscribe, unsubscribe, reportSignalChange } = usePushNotifications();
   const prevSignalRef = useRef<string | null>(null);
@@ -311,62 +311,78 @@ export default function Home() {
             ) : null}
           </div>
 
-          {/* RE-ENTRY TRIGGER */}
+          {/* RE-ENTRY TRIGGER — all assets, 2-day rolling */}
           <div className="panel p-5 flex flex-col gap-4">
-            <SectionHeader icon={<Target size={14} />} title="Re-Entry Trigger" subtitle="BTC 30-day momentum flip — when to re-enter from cash" />
-            {loading && !signal ? (
-              <div className="space-y-3"><Skeleton className="h-8 w-40" /><Skeleton className="h-4 w-full" /><Skeleton className="h-32 w-full" /></div>
-            ) : signal ? (
-              <div className="space-y-4">
-                {/* Trigger price */}
-                <div className={`p-4 rounded-lg border ${signal.reentryAlreadyMet ? "border-emerald-500/30 bg-emerald-500/8" : "border-primary/20 bg-primary/5"}`}>
-                  <p className="text-xs text-muted-foreground mb-1">30-Day Ago BTC Price (momentum pivot)</p>
-                  <AnimatedNumber
-                    value={formatPrice(signal.reentryTriggerPrice)}
-                    className="text-2xl font-bold text-white data-number"
-                  />
-                  <div className="flex items-center gap-2 mt-2">
-                    {signal.reentryAlreadyMet ? (
-                      <><CheckCircle size={13} className="text-emerald-400" /><span className="text-xs text-emerald-400 font-semibold">Momentum POSITIVE — BTC qualifies</span></>
-                    ) : (
-                      <><XCircle size={13} className="text-red-400" /><span className="text-xs text-red-400 font-semibold">Momentum NEGATIVE — below re-entry</span></>
-                    )}
-                  </div>
+            <SectionHeader icon={<Target size={14} />} title="Re-Entry Triggers" subtitle="30-day momentum pivot — today & tomorrow for all assets" />
+            {loading && !reentryTable.length ? (
+              <div className="space-y-2">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            ) : (
+              <div className="space-y-1">
+                {/* Header row */}
+                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-2 pb-1 border-b border-border/20">
+                  <span className="text-xs text-muted-foreground/50 uppercase tracking-wider">Asset</span>
+                  <span className="text-xs text-muted-foreground/50 uppercase tracking-wider text-right w-20">Now</span>
+                  <span className="text-xs text-muted-foreground/50 uppercase tracking-wider text-right w-20">Today</span>
+                  <span className="text-xs text-muted-foreground/50 uppercase tracking-wider text-right w-20">Tomorrow</span>
                 </div>
 
-                {/* Gap */}
-                {!signal.reentryAlreadyMet && signal.reentryTriggerPrice > 0 && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
-                      <p className="text-xs text-muted-foreground mb-1">Gap to Re-Entry</p>
-                      <p className="text-sm font-bold mono-data text-foreground">{formatPrice(Math.abs(signal.reentryGapUsd))}</p>
-                    </div>
-                    <div className="p-2.5 rounded-lg border border-border/20 bg-card/30">
-                      <p className="text-xs text-muted-foreground mb-1">Gap %</p>
-                      <p className={`text-sm font-bold mono-data ${signal.reentryGapPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatPct(signal.reentryGapPct)}</p>
-                    </div>
-                  </div>
-                )}
+                {reentryTable.map(row => {
+                  if (row.currentPrice === 0) return null;
+                  const isHighPrice = row.currentPrice > 100; // BTC/ETH vs SOL/SUI/DOGE
+                  const fmt = (v: number) => isHighPrice ? formatPrice(v) : `$${v.toFixed(4)}`;
+                  return (
+                    <div
+                      key={row.symbol}
+                      className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center px-2 py-2 rounded-lg transition-colors"
+                      style={{ background: row.metToday ? "oklch(0.72 0.18 155 / 6%)" : "transparent" }}
+                    >
+                      {/* Asset name */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-base w-5 text-center" style={{ color: ASSET_COLORS[row.symbol] }}>{row.icon}</span>
+                        <span className="text-sm font-bold text-foreground" style={{ fontFamily: "Syne, sans-serif" }}>{row.symbol}</span>
+                        {row.metToday && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 font-semibold">✓</span>
+                        )}
+                      </div>
 
-                {/* Rolling thresholds */}
-                {signal.reentryRolling.length > 0 && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-2">Rolling Thresholds (window shifts daily at 00:05 UTC)</p>
-                    <div className="space-y-1.5">
-                      {signal.reentryRolling.map(r => (
-                        <div key={r.daysFromNow} className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground mono-data">In {r.daysFromNow}d</span>
-                          <span className="font-semibold mono-data text-foreground/80">{formatPrice(r.triggerPrice)}</span>
-                          <span className={`mono-data ${r.deltaPct >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
-                            {r.deltaPct >= 0 ? "✓ met" : `↑ ${formatPct(Math.abs(r.deltaPct), false)} needed`}
-                          </span>
-                        </div>
-                      ))}
+                      {/* Current price */}
+                      <div className="text-right w-20">
+                        <p className="text-xs font-semibold mono-data text-foreground/80">{fmt(row.currentPrice)}</p>
+                      </div>
+
+                      {/* Today's trigger */}
+                      <div className="text-right w-20">
+                        <p className={`text-xs font-bold mono-data ${row.metToday ? "text-emerald-400" : "text-foreground/70"}`}>
+                          {fmt(row.triggerToday)}
+                        </p>
+                        <p className={`text-xs mono-data ${row.metToday ? "text-emerald-400" : "text-amber-400"}`}>
+                          {row.metToday ? "✓ met" : `+${row.gapTodayPct.toFixed(1)}%`}
+                        </p>
+                      </div>
+
+                      {/* Tomorrow's trigger */}
+                      <div className="text-right w-20">
+                        <p className={`text-xs font-bold mono-data ${row.metTomorrow ? "text-emerald-400" : "text-foreground/70"}`}>
+                          {fmt(row.triggerTomorrow)}
+                        </p>
+                        <p className={`text-xs mono-data ${row.metTomorrow ? "text-emerald-400" : "text-muted-foreground/50"}`}>
+                          {row.metTomorrow ? "✓ met" : `+${row.gapTomorrowPct.toFixed(1)}%`}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })}
+
+                {/* Legend */}
+                <div className="pt-2 border-t border-border/20 flex flex-wrap gap-3 text-xs text-muted-foreground/50">
+                  <span>Trigger = price 30 days ago</span>
+                  <span>·</span>
+                  <span>Tomorrow = window shifts +1 day at 00:05 UTC</span>
+                  <span>·</span>
+                  <span className="text-emerald-400/70">✓ = momentum positive, re-entry allowed</span>
+                </div>
               </div>
-            ) : null}
+            )}
           </div>
         </div>
 
