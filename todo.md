@@ -59,3 +59,20 @@
 - [ ] "Remember me" toggle for password (localStorage vs sessionStorage)
 - [ ] Connect to DigitalOcean script output JSON for exact trade matching
 - [ ] Custom domain www.thefinancialrevolution.com.au fully verified
+
+## v7.1 Strategy Upgrade
+- [x] useBinanceData: bump version label to v7.1
+- [x] useBinanceData: SUI/DOGE cap changed from 60% to 35%
+- [x] useBinanceData: MIN_HOLD_DAYS changed from 14 to 7
+- [x] useBinanceData: BTC_NEW_HIGH_DAYS changed from 5 to 3
+- [x] useBinanceData: confidence zone thresholds updated (HIGH ≥0.65, MED-HIGH 0.55-0.64, MED 0.45-0.54, MED-LOW 0.35-0.44, LOW <0.35)
+- [x] useBinanceData: new Rule 2 re-entry gate (in_full_cash state, before asset ranking)
+- [x] useBinanceData: new Rule 3 all-negative exit (7-day block, sets in_full_cash)
+- [x] useBinanceData: rule numbering updated (min-hold=Rule 4, rally=Rule 5, breakout=Rule 6)
+- [x] useBinanceData: all_negative boolean flag on signal output
+- [x] useBinanceData: all_neg_exits and all_neg_blocked counters on signal output
+- [x] Home.tsx: update header to show v7.1
+- [x] Home.tsx: update strategy parameter table to show new values (7d hold, 3d rally, 35% SUI/DOGE)
+- [x] Home.tsx: add All-Negative indicator in signal/BTC Health panel
+- [x] Home.tsx: update rule labels in signal display (Rule 3=ALL_NEGATIVE, renumber others)
+- [x] Home.tsx: update backtest stats to v7.1 figures (CAGR 10.1%, Sharpe 0.437, Max DD -47.4%)

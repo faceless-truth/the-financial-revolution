@@ -1,19 +1,17 @@
 /*
- * useBinanceData — TREND_CONFIRM Strategy v7.0 Conservative
+ * useBinanceData — TREND_CONFIRM Strategy v7.1 Conservative
  * ==========================================================
- * Mirrors TrendConfirmStrategy exactly:
+ * v7.1 changes from v7.0:
+ * - SUI/DOGE cap: 60% → 35%
+ * - MIN_HOLD_DAYS: 14 → 7
+ * - BTC_NEW_HIGH_DAYS: 5 → 3
+ * - Confidence zone thresholds updated
+ * - NEW Rule 2: Re-entry gate (in_full_cash state before asset ranking)
+ * - NEW Rule 3: All-negative exit (7-day whipsaw block, sets in_full_cash)
+ * - Rules renumbered: min-hold=4, rally=5, breakout=6
+ * - Signal fields: all_negative, all_neg_exits, all_neg_blocked
  *
- * - 30-day momentum: (close / close[30d ago] - 1) * 100  — direct, no pairwise
- * - Cash triggers: BTC drawdown from 30d high ≥ 12% (PARTIAL) or ≥ 25% (FULL)
- * - Rule 1: Cash triggers (NONE / PARTIAL / FULL)
- * - Rule 2: Min-hold 14 days — block rotation if current asset held < 14 days
- * - Rule 3: BTC rally — if BTC made new high in last 5 days, block alts
- * - Rule 4: Breakout check — alt must be within 5% of 30d high
- * - Rule 5: Asset selection — best 30d momentum with positive score
- * - Confidence Score v3: F&G 55% + STH Proxy (BTC / 90d MA) 45%
- * - Leverage: DISABLED (LEVERAGE_ENABLED = false)
- * - Execution: 00:05 UTC daily
- * - Backtest: +413% return, 60% max DD, +211pp vs BTC (2021–2026)
+ * Rule priority: BTC crash > Re-entry gate > All-negative exit > Min-hold > BTC rally > Breakout > Enter/Hold/Rotate
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,25 +32,27 @@ export const PER_ASSET_CAPS: Record<Asset, number> = {
   BTC: 1.0,
   ETH: 1.0,
   SOL: 1.0,
-  SUI: 0.6,
-  DOGE: 0.6,
+  SUI: 0.35,   // v7.1: was 0.60
+  DOGE: 0.35,  // v7.1: was 0.60
 };
 
 export const MOMENTUM_PERIOD = 30;
 export const HIGH_LOOKBACK = 30;
 export const CASH_PARTIAL_THRESHOLD = 0.12;  // 12%
 export const CASH_FULL_THRESHOLD = 0.25;     // 25%
-export const MIN_HOLD_DAYS = 14;
-export const BTC_NEW_HIGH_DAYS = 5;
+export const MIN_HOLD_DAYS = 7;              // v7.1: was 14
+export const BTC_NEW_HIGH_DAYS = 3;          // v7.1: was 5
 export const BREAKOUT_THRESHOLD = 0.05;      // within 5% of 30d high
 export const LEVERAGE_ENABLED = false;
 export const LEVERAGE_MULTIPLIER = 2.0;
+export const ALL_NEGATIVE_EXIT_ENABLED = true; // v7.1 addition
+export const ALL_NEG_HOLD_BLOCK = 7;           // v7.1: block all-neg exit if held < 7 days
 
-// Confidence Score v3 zone thresholds
-export const CONF_ZONE_HIGH = 0.68;
-export const CONF_ZONE_MED_HIGH = 0.55;
-export const CONF_ZONE_MED = 0.40;
-export const CONF_ZONE_MED_LOW = 0.28;
+// Confidence Score v3 zone thresholds (v7.1 updated)
+export const CONF_ZONE_HIGH = 0.65;        // v7.1: was 0.68
+export const CONF_ZONE_MED_HIGH = 0.55;    // unchanged
+export const CONF_ZONE_MED = 0.45;         // v7.1: was 0.40
+export const CONF_ZONE_MED_LOW = 0.35;     // v7.1: was 0.28
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface Candle {
@@ -88,6 +88,7 @@ export interface BtcHealth {
   partialTriggerPrice: number;
   fullTriggerPrice: number;
   allocationMultiplier: number; // 1.0 / 0.5 / 0.0
+  allNegative: boolean;      // v7.1: all 5 assets have negative 30d momentum
 }
 
 export interface ConfidenceV3 {
@@ -105,12 +106,14 @@ export interface ConfidenceV3 {
 export type RuleTriggered =
   | "CASH_FULL"
   | "CASH_PARTIAL"
-  | "MIN_HOLD"
-  | "BTC_RALLY"
-  | "NO_BREAKOUT"
+  | "REENTRY_GATE"       // v7.1: Rule 2
+  | "ALL_NEGATIVE"       // v7.1: Rule 3
+  | "ALL_NEGATIVE_BLOCKED" // v7.1: Rule 3 blocked by hold period
+  | "MIN_HOLD"           // Rule 4 (was Rule 2)
+  | "BTC_RALLY"          // Rule 5 (was Rule 3)
+  | "NO_BREAKOUT"        // Rule 6 (was Rule 4)
   | "BTC_BEST"
   | "ALT_BREAKOUT"
-  | "ALL_NEGATIVE"
   | "HOLD"
   | "";
 
@@ -137,6 +140,11 @@ export interface StrategySignal {
   altBlockedRally: boolean;
   altBlockedBreakout: boolean;
   daysHeld: number;
+  // v7.1 new fields
+  allNegative: boolean;
+  allNegExits: number;
+  allNegBlocked: number;
+  inFullCash: boolean;
   // Legacy fields for Portfolio page compatibility
   momentumScores: Partial<Record<Asset, number>>;
   momentumRanked: Array<{ asset: Asset; score: number }>;
@@ -225,16 +233,18 @@ function confidenceZone(score: number): ConfidenceV3["zone"] {
 
 // ── BTC Health ────────────────────────────────────────────────────────────────
 
-function deriveBtcHealth(btcCandles: Candle[]): BtcHealth {
+function deriveBtcHealth(btcCandles: Candle[], momentum30: Partial<Record<Asset, number>>): BtcHealth {
+  const allNegative = MAJORS.every(s => (momentum30[s] ?? 0) <= 0);
+
   if (btcCandles.length < HIGH_LOOKBACK + 1) {
-    return { price: 0, high30d: 0, drawdownPct: 0, isRallying: false, cashTriggerStatus: "NONE", partialTriggerPrice: 0, fullTriggerPrice: 0, allocationMultiplier: 1.0 };
+    return { price: 0, high30d: 0, drawdownPct: 0, isRallying: false, cashTriggerStatus: "NONE", partialTriggerPrice: 0, fullTriggerPrice: 0, allocationMultiplier: 1.0, allNegative };
   }
   const latest = btcCandles[btcCandles.length - 1];
   const price = latest.close;
   const high30d = Math.max(...btcCandles.slice(-HIGH_LOOKBACK).map(c => c.high));
   const drawdownPct = high30d > 0 ? ((high30d - price) / high30d) * 100 : 0;
 
-  // BTC rallying: made new high in last BTC_NEW_HIGH_DAYS days
+  // BTC rallying: made new high in last BTC_NEW_HIGH_DAYS days (v7.1: 3 days)
   const recentHighs = btcCandles.slice(-BTC_NEW_HIGH_DAYS);
   const prevHigh = btcCandles.length > BTC_NEW_HIGH_DAYS
     ? Math.max(...btcCandles.slice(-(HIGH_LOOKBACK + BTC_NEW_HIGH_DAYS), -BTC_NEW_HIGH_DAYS).map(c => c.high))
@@ -260,6 +270,7 @@ function deriveBtcHealth(btcCandles: Candle[]): BtcHealth {
     partialTriggerPrice: high30d * (1 - CASH_PARTIAL_THRESHOLD),
     fullTriggerPrice: high30d * (1 - CASH_FULL_THRESHOLD),
     allocationMultiplier,
+    allNegative,
   };
 }
 
@@ -290,14 +301,26 @@ function calcReentry(btcCandles: Candle[]): Pick<StrategySignal, "reentryTrigger
   return { reentryTriggerPrice: Math.round(triggerPrice), reentryGapUsd: Math.round(gapUsd), reentryGapPct: Math.round(gapPct * 100) / 100, reentryAlreadyMet: alreadyMet, reentryRolling: rolling };
 }
 
-// ── Signal generation (mirrors generate_signal + _determine_action) ───────────
+// ── Signal generation — v7.1 rule order ───────────────────────────────────────
+// Rule 1:  BTC crash guard (FULL cash, bypasses hold period)
+// Rule 1b: BTC partial cash flag (continue with 50% allocation)
+// Rule 2:  Re-entry gate (if in_full_cash, wait for BTC momentum > 0)
+// Rule 3:  All-negative exit (7-day block)
+// Rule 4:  Minimum hold (7 days, blocks rotation)
+// Rule 5:  BTC rally block (3-day window)
+// Rule 6:  Breakout confirmation (within 5% of 30d high)
+// Rule 7:  Enter / Hold / Rotate
 
 function buildSignal(
   btcHealth: BtcHealth,
   momentum30: Partial<Record<Asset, number>>,
   assets: Partial<Record<Asset, AssetMetrics>>,
   confidence: ConfidenceV3,
-  reentry: ReturnType<typeof calcReentry>
+  reentry: ReturnType<typeof calcReentry>,
+  // v7.1: in_full_cash and hold_days come from persistent state
+  // Since we don't have server state, we derive them from market conditions
+  inFullCash: boolean,
+  daysHeld: number,
 ): StrategySignal {
   const ranked = MAJORS
     .filter(s => momentum30[s] !== undefined)
@@ -308,9 +331,11 @@ function buildSignal(
   ranked.forEach(r => { momentumScores[r.symbol] = r.score; });
   const momentumRanked = ranked.map(r => ({ asset: r.symbol, score: r.score }));
 
-  const base: Omit<StrategySignal, "action" | "targetPositions" | "ruleTriggered" | "reason" | "topAsset" | "allocationMultiplier" | "rotationBlocked" | "altBlockedRally" | "altBlockedBreakout" | "daysHeld"> = {
+  const allNegative = btcHealth.allNegative;
+
+  const base: Omit<StrategySignal, "action" | "targetPositions" | "ruleTriggered" | "reason" | "topAsset" | "allocationMultiplier" | "rotationBlocked" | "altBlockedRally" | "altBlockedBreakout" | "daysHeld" | "allNegExits" | "allNegBlocked" | "inFullCash"> = {
     leverage: 1.0,
-    leverageReason: "Leverage disabled",
+    leverageReason: "Leverage disabled in v7.1 Conservative",
     confidence: confidence.score,
     confidenceZone: confidence.zone,
     ...reentry,
@@ -319,22 +344,26 @@ function buildSignal(
     btcDrawdown: btcHealth.drawdownPct / 100,
     btc30dHigh: btcHealth.high30d,
     btcRallying: btcHealth.isRallying,
+    allNegative,
   };
 
-  // RULE 1: Full cash trigger
+  // RULE 1: Full cash trigger — bypasses ALL other rules including hold period
   if (btcHealth.cashTriggerStatus === "FULL") {
     return {
       ...base,
       action: "SELL_ALL",
       targetPositions: {},
       ruleTriggered: "CASH_FULL",
-      reason: `BTC down ${btcHealth.drawdownPct.toFixed(1)}% from 30d high — full cash`,
+      reason: `BTC down ${btcHealth.drawdownPct.toFixed(1)}% from 30d high — full cash (Rule 1, bypasses hold period)`,
       topAsset: null,
       allocationMultiplier: 0.0,
       rotationBlocked: false,
       altBlockedRally: false,
       altBlockedBreakout: false,
-      daysHeld: 0,
+      daysHeld,
+      allNegExits: 0,
+      allNegBlocked: 0,
+      inFullCash: true,
     };
   }
 
@@ -344,6 +373,30 @@ function buildSignal(
   const partialNote = btcHealth.cashTriggerStatus === "PARTIAL"
     ? ` (50% allocation — partial cash trigger at ${btcHealth.drawdownPct.toFixed(1)}%)`
     : "";
+
+  // RULE 2: Re-entry gate — if in full cash, wait for BTC 30d momentum to turn positive
+  if (inFullCash) {
+    const btcMomentum = momentum30["BTC"] ?? 0;
+    if (btcMomentum <= 0) {
+      return {
+        ...base,
+        action: "HOLD",
+        targetPositions: {},
+        ruleTriggered: "REENTRY_GATE",
+        reason: `In full cash — waiting for BTC 30d momentum to turn positive (currently ${btcMomentum.toFixed(1)}%). Re-entry trigger: $${reentry.reentryTriggerPrice.toLocaleString()}`,
+        topAsset: null,
+        allocationMultiplier: 0.0,
+        rotationBlocked: false,
+        altBlockedRally: false,
+        altBlockedBreakout: false,
+        daysHeld,
+        allNegExits: 0,
+        allNegBlocked: 0,
+        inFullCash: true,
+      };
+    }
+    // BTC momentum turned positive — clear in_full_cash and continue to asset selection
+  }
 
   if (!ranked.length) {
     return {
@@ -357,14 +410,58 @@ function buildSignal(
       rotationBlocked: false,
       altBlockedRally: false,
       altBlockedBreakout: false,
-      daysHeld: 0,
+      daysHeld,
+      allNegExits: 0,
+      allNegBlocked: 0,
+      inFullCash: false,
+    };
+  }
+
+  // RULE 3: All-negative exit (v7.1 addition)
+  // Only fires if currently holding a position (not in cash already)
+  if (ALL_NEGATIVE_EXIT_ENABLED && allNegative && !inFullCash) {
+    if (daysHeld < ALL_NEG_HOLD_BLOCK) {
+      // Blocked by hold period — whipsaw protection
+      return {
+        ...base,
+        action: "HOLD",
+        targetPositions: ranked[0] && ranked[0].score > 0 ? { [ranked[0].symbol]: allocationMultiplier } : {},
+        ruleTriggered: "ALL_NEGATIVE_BLOCKED",
+        reason: `All 5 assets have negative 30d momentum but hold period not met (${daysHeld}/${ALL_NEG_HOLD_BLOCK} days) — whipsaw block active${partialNote}`,
+        topAsset: ranked[0]?.symbol ?? null,
+        allocationMultiplier,
+        rotationBlocked: true,
+        altBlockedRally: false,
+        altBlockedBreakout: false,
+        daysHeld,
+        allNegExits: 0,
+        allNegBlocked: 1,
+        inFullCash: false,
+      };
+    }
+    // Hold period met — exit to full cash
+    return {
+      ...base,
+      action: "SELL_ALL",
+      targetPositions: {},
+      ruleTriggered: "ALL_NEGATIVE",
+      reason: `All 5 assets have negative 30d momentum and hold period met (${daysHeld} days) — exiting to full cash (Rule 3)`,
+      topAsset: null,
+      allocationMultiplier: 0.0,
+      rotationBlocked: false,
+      altBlockedRally: false,
+      altBlockedBreakout: false,
+      daysHeld,
+      allNegExits: 1,
+      allNegBlocked: 0,
+      inFullCash: true,
     };
   }
 
   const bestAsset = ranked[0].symbol;
   const bestScore = ranked[0].score;
 
-  // RULE 3 & 4: Alt blocking (only relevant if best is not BTC)
+  // RULE 5: BTC rally block (v7.1: 3-day window, was 5)
   if (bestAsset !== "BTC") {
     if (btcHealth.isRallying) {
       const btcScore = momentum30["BTC"] ?? 0;
@@ -373,16 +470,20 @@ function buildSignal(
         action: btcScore > 0 ? "BUY" : "HOLD",
         targetPositions: btcScore > 0 ? { BTC: allocationMultiplier } : {},
         ruleTriggered: "BTC_RALLY",
-        reason: `BTC rallying (new high in last ${BTC_NEW_HIGH_DAYS} days) — no alts allowed${partialNote}`,
+        reason: `BTC rallying (new high in last ${BTC_NEW_HIGH_DAYS} days) — no alts allowed (Rule 5)${partialNote}`,
         topAsset: btcScore > 0 ? "BTC" : null,
         allocationMultiplier,
         rotationBlocked: false,
         altBlockedRally: true,
         altBlockedBreakout: false,
-        daysHeld: 0,
+        daysHeld,
+        allNegExits: 0,
+        allNegBlocked: 0,
+        inFullCash: false,
       };
     }
 
+    // RULE 6: Breakout confirmation
     const assetMetric = assets[bestAsset];
     const nearHigh = assetMetric?.nearHigh30 ?? false;
     if (!nearHigh) {
@@ -392,35 +493,41 @@ function buildSignal(
         action: btcScore > 0 ? "BUY" : "HOLD",
         targetPositions: btcScore > 0 ? { BTC: allocationMultiplier } : {},
         ruleTriggered: "NO_BREAKOUT",
-        reason: `${bestAsset} not breaking out (not within ${BREAKOUT_THRESHOLD * 100}% of 30d high) — staying with BTC${partialNote}`,
+        reason: `${bestAsset} not breaking out (not within ${BREAKOUT_THRESHOLD * 100}% of 30d high) — staying with BTC (Rule 6)${partialNote}`,
         topAsset: btcScore > 0 ? "BTC" : null,
         allocationMultiplier,
         rotationBlocked: false,
         altBlockedRally: false,
         altBlockedBreakout: true,
-        daysHeld: 0,
+        daysHeld,
+        allNegExits: 0,
+        allNegBlocked: 0,
+        inFullCash: false,
       };
     }
   }
 
-  // All negative
+  // All negative momentum (no positive assets)
   if (bestScore <= 0) {
     return {
       ...base,
       action: "HOLD",
       targetPositions: {},
       ruleTriggered: "ALL_NEGATIVE",
-      reason: `All assets have negative 30-day momentum${partialNote}`,
+      reason: `All assets have negative 30d momentum${partialNote}`,
       topAsset: bestAsset,
       allocationMultiplier,
       rotationBlocked: false,
       altBlockedRally: false,
       altBlockedBreakout: false,
-      daysHeld: 0,
+      daysHeld,
+      allNegExits: 0,
+      allNegBlocked: 0,
+      inFullCash: false,
     };
   }
 
-  // Asset selected
+  // RULE 7: Asset selected — enter / hold / rotate
   const cap = PER_ASSET_CAPS[bestAsset];
   const alloc = Math.min(allocationMultiplier, cap);
   const targetPositions: Partial<Record<Asset, number>> = { [bestAsset]: alloc };
@@ -433,8 +540,8 @@ function buildSignal(
 
   const ruleTriggered: RuleTriggered = bestAsset === "BTC" ? "BTC_BEST" : "ALT_BREAKOUT";
   const reason = bestAsset === "BTC"
-    ? `BTC best momentum (${bestScore > 0 ? "+" : ""}${bestScore.toFixed(1)}%)${partialNote}`
-    : `${bestAsset} breaking out (${bestScore > 0 ? "+" : ""}${bestScore.toFixed(1)}%)${partialNote}`;
+    ? `BTC best momentum (${bestScore > 0 ? "+" : ""}${bestScore.toFixed(1)}%) — Rule 7${partialNote}`
+    : `${bestAsset} breaking out (${bestScore > 0 ? "+" : ""}${bestScore.toFixed(1)}%) — Rule 7${partialNote}`;
 
   return {
     ...base,
@@ -447,7 +554,10 @@ function buildSignal(
     rotationBlocked: false,
     altBlockedRally: false,
     altBlockedBreakout: false,
-    daysHeld: 0,
+    daysHeld,
+    allNegExits: 0,
+    allNegBlocked: 0,
+    inFullCash: false,
   };
 }
 
@@ -491,9 +601,7 @@ function calcReentryTable(candleMap: Partial<Record<Asset, Candle[]>>): ReentryR
       };
     }
     const currentPrice = candles[candles.length - 1].close;
-    // Today's trigger = close from exactly 30 days ago
     const triggerToday = candles[candles.length - 1 - MOMENTUM_PERIOD].close;
-    // Tomorrow's trigger = close from 29 days ago (the window shifts forward 1 day)
     const triggerTomorrow = candles[candles.length - MOMENTUM_PERIOD].close;
     const metToday = currentPrice >= triggerToday;
     const metTomorrow = currentPrice >= triggerTomorrow;
@@ -513,16 +621,35 @@ function calcReentryTable(candleMap: Partial<Record<Asset, Candle[]>>): ReentryR
   });
 }
 
+// ── Derive in_full_cash from market state ─────────────────────────────────────
+// Since we don't have server-side state, we derive in_full_cash from:
+// 1. BTC cash trigger FULL was active recently (drawdown ≥ 25%)
+// 2. All assets negative (all-neg exit would have fired)
+// 3. BTC 30d momentum is negative (re-entry not yet met)
+// This is a best-effort approximation for the frontend-only signal display.
+function deriveInFullCash(
+  btcHealth: BtcHealth,
+  momentum30: Partial<Record<Asset, number>>,
+): boolean {
+  // If BTC crash guard is currently active → in full cash
+  if (btcHealth.cashTriggerStatus === "FULL") return true;
+  // If BTC 30d momentum is negative and all assets are negative → likely in cash
+  const btcMom = momentum30["BTC"] ?? 0;
+  if (btcMom <= 0 && btcHealth.allNegative) return true;
+  return false;
+}
+
 // ── Main hook ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_BTC_HEALTH: BtcHealth = {
   price: 0, high30d: 0, drawdownPct: 0, isRallying: false,
   cashTriggerStatus: "NONE", partialTriggerPrice: 0, fullTriggerPrice: 0, allocationMultiplier: 1.0,
+  allNegative: false,
 };
 
 const DEFAULT_CONF: ConfidenceV3 = {
   score: 0.5, zone: "MEDIUM", fngValue: 50, fng30dAvg: 50, sthRatio: 1.0,
-  btcAbove200: false, leverageEnabled: false, leverageFiring: false, leverageReason: "Leverage disabled",
+  btcAbove200: false, leverageEnabled: false, leverageFiring: false, leverageReason: "Leverage disabled in v7.1 Conservative",
 };
 
 export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
@@ -578,7 +705,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         const ma200 = calcMA(candles, Math.min(200, candles.length));
         const ma90 = calcMA(candles, Math.min(90, candles.length));
         const high30 = Math.max(...candles.slice(-HIGH_LOOKBACK).map(c => c.high));
-        const drawdownFromHigh30 = ((latest.close - high30) / high30) * 100; // negative = below high
+        const drawdownFromHigh30 = ((latest.close - high30) / high30) * 100;
         const change24h = prev ? ((latest.close - prev.close) / prev.close) * 100 : 0;
         const nearHigh30 = (high30 - latest.close) / high30 <= BREAKOUT_THRESHOLD;
         momentum30[symbol] = mom30;
@@ -595,15 +722,15 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         };
       }
 
-      // Ranked by direct 30d momentum (no pairwise)
+      // Ranked by direct 30d momentum
       const ranked = MAJORS
         .filter(s => assetMetrics[s])
         .map(s => ({ symbol: s as Asset, score: momentum30[s]! }))
         .sort((a, b) => b.score - a.score)
         .map((a, i) => ({ ...a, rank: i + 1 }));
 
-      // BTC health
-      const btcHealth = deriveBtcHealth(candleMap["BTC"] ?? []);
+      // BTC health (v7.1: pass momentum30 for allNegative flag)
+      const btcHealth = deriveBtcHealth(candleMap["BTC"] ?? [], momentum30);
 
       // Confidence v3
       const btcCandles = candleMap["BTC"] ?? [];
@@ -613,7 +740,6 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
       const sthRatio = ma90BTC > 0 ? btcPrice / ma90BTC : 1.0;
       const btcAbove200 = btcPrice > ma200BTC;
       const confScore = Math.round((scoreFng(fng.current, fng.avg30d) * 0.55 + scoreSth(sthRatio) * 0.45) * 10000) / 10000;
-      // Leverage disabled in v7.0 Conservative
       const confidence: ConfidenceV3 = {
         score: confScore,
         zone: confidenceZone(confScore),
@@ -623,7 +749,7 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
         btcAbove200,
         leverageEnabled: LEVERAGE_ENABLED,
         leverageFiring: false,
-        leverageReason: "Leverage disabled in v7.0 Conservative",
+        leverageReason: "Leverage disabled in v7.1 Conservative",
       };
 
       // Re-entry trigger
@@ -632,8 +758,11 @@ export function useBinanceData(refreshMs = 5 * 60 * 1000): BinanceDataResult {
       // Per-asset 2-day re-entry table
       const reentryTable = calcReentryTable(candleMap);
 
-      // Signal
-      const signal = buildSignal(btcHealth, momentum30, assetMetrics, confidence, reentry);
+      // Derive in_full_cash state (best-effort from market data)
+      const inFullCash = deriveInFullCash(btcHealth, momentum30);
+
+      // Signal (v7.1 rule order, daysHeld=0 as we don't track server state on frontend)
+      const signal = buildSignal(btcHealth, momentum30, assetMetrics, confidence, reentry, inFullCash, 0);
 
       setResult({
         signal,

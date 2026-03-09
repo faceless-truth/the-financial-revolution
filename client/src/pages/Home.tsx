@@ -2,7 +2,7 @@
  * The Financial Revolution — Strategy Dashboard
  * Design: Dark Precision — deep navy panels, luminous data, colour-coded signals
  * Fonts: Syne (display/numbers) + Geist (labels) + JetBrains Mono (data)
- * Strategy: TREND_CONFIRM v7.0 Conservative — 30-day momentum, 4-rule decision flow, leverage disabled
+ * Strategy: TREND_CONFIRM v7.1 Conservative — 30-day momentum, 6-rule decision flow, leverage disabled
  */
 
 import {
@@ -203,7 +203,7 @@ export default function Home() {
               <h1 className="text-lg font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>
                 The Financial <span className="text-primary opacity-80">Revolution</span>
               </h1>
-              <p className="text-xs text-muted-foreground">TREND_CONFIRM v7.0 Conservative · Live Binance Data · Executes 00:05 UTC</p>
+              <p className="text-xs text-muted-foreground">TREND_CONFIRM v7.1 Conservative · Live Binance Data · Executes 00:05 UTC</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -714,7 +714,7 @@ export default function Home() {
                     <span className="text-xs text-muted-foreground">2x Leverage Gate (≥{CONF_ZONE_HIGH} AND BTC &gt; MA200)</span>
                     <span className="text-xs font-bold text-muted-foreground/50">DISABLED</span>
                   </div>
-                  <p className="text-xs text-muted-foreground/40 mt-1">Leverage disabled in v7.0 Conservative — always 1x</p>
+                  <p className="text-xs text-muted-foreground/40 mt-1">Leverage disabled in v7.1 Conservative — always 1x</p>
                 </div>
               </div>
             </div>
@@ -784,7 +784,7 @@ export default function Home() {
 
           {/* DECISION FLOW */}
           <div className="panel p-5">
-            <SectionHeader icon={<Target size={14} />} title="Decision Flow" subtitle="4 rules evaluated in order — daily candle close only" />
+            <SectionHeader icon={<Target size={14} />} title="Decision Flow" subtitle="6 rules evaluated in order — daily candle close only" />
             {loading && !signal ? (
               <div className="space-y-2">{[1,2,3,4].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
             ) : signal ? (
@@ -814,21 +814,72 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Rule 2: Min-hold */}
+                {/* Rule 2: Re-entry gate (v7.1) */}
+                {(() => {
+                  const triggered = signal.ruleTriggered === "REENTRY_GATE";
+                  const inCash = signal.inFullCash;
+                  const btcMom = signal.momentumScores["BTC"] ?? 0;
+                  return (
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-blue-500/40 bg-blue-500/8" : inCash ? "border-blue-500/20 bg-blue-500/5" : "border-border/20 bg-card/20"}`}>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-blue-500/20 text-blue-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                        {triggered ? "!" : "2"}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground/90">Rule 2 — Re-Entry Gate <span className="text-primary/60 text-[10px]">v7.1</span></span>
+                          {triggered && <span className="text-xs text-blue-400 font-mono">WAITING</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 mono-data">
+                          {inCash
+                            ? `In full cash — BTC 30d momentum: ${btcMom >= 0 ? "+" : ""}${btcMom.toFixed(1)}% (need > 0 to re-enter)`
+                            : "Not in full cash — gate inactive"}
+                        </p>
+                        {triggered && <p className="text-xs text-blue-300 mt-1 font-medium">→ {signal.reason}</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Rule 3: All-negative exit (v7.1) */}
+                {(() => {
+                  const triggered = signal.ruleTriggered === "ALL_NEGATIVE";
+                  const blocked = signal.ruleTriggered === "ALL_NEGATIVE_BLOCKED";
+                  const allNeg = signal.allNegative;
+                  return (
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-red-500/40 bg-red-500/8" : blocked ? "border-amber-500/30 bg-amber-500/5" : allNeg ? "border-orange-500/20 bg-orange-500/5" : "border-border/20 bg-card/20"}`}>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-red-500/20 text-red-400" : blocked ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
+                        {triggered || blocked ? "!" : "3"}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground/90">Rule 3 — All-Negative Exit <span className="text-primary/60 text-[10px]">v7.1</span></span>
+                          {triggered && <span className="text-xs text-red-400 font-mono">TRIGGERED</span>}
+                          {blocked && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 mono-data">
+                          All 5 assets negative: {allNeg ? <span className="text-orange-400">YES — exit if hold ≥ 7d</span> : <span className="text-emerald-400">NO — rule inactive</span>}
+                        </p>
+                        {(triggered || blocked) && <p className="text-xs text-amber-300 mt-1 font-medium">→ {signal.reason}</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Rule 4: Min-hold */}
                 {(() => {
                   const triggered = signal.ruleTriggered === "MIN_HOLD";
                   return (
                     <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-amber-500/40 bg-amber-500/8" : "border-border/20 bg-card/20"}`}>
                       <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                        {triggered ? "!" : "2"}
+                        {triggered ? "!" : "4"}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-foreground/90">Rule 2 — Min-Hold Period</span>
+                          <span className="text-xs font-semibold text-foreground/90">Rule 4 — Min-Hold Period</span>
                           {triggered && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 mono-data">
-                          {triggered ? `Held ${signal.daysHeld}/${MIN_HOLD_DAYS} days — rotation blocked` : `Min hold: ${MIN_HOLD_DAYS} days`}
+                          {triggered ? `Held ${signal.daysHeld}/${MIN_HOLD_DAYS} days — rotation blocked` : `Min hold: ${MIN_HOLD_DAYS} days (v7.1: was 14)`}
                         </p>
                         {triggered && <p className="text-xs text-amber-300 mt-1 font-medium">→ {signal.reason}</p>}
                       </div>
@@ -836,17 +887,17 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Rule 3: BTC rally */}
+                {/* Rule 5: BTC rally */}
                 {(() => {
                   const triggered = signal.ruleTriggered === "BTC_RALLY";
                   return (
                     <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-amber-500/40 bg-amber-500/8" : btcHealth.isRallying ? "border-amber-500/20 bg-amber-500/5" : "border-border/20 bg-card/20"}`}>
                       <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                        {triggered ? "!" : "3"}
+                        {triggered ? "!" : "5"}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-foreground/90">Rule 3 — BTC Rally Block</span>
+                          <span className="text-xs font-semibold text-foreground/90">Rule 5 — BTC Rally Block</span>
                           {triggered && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 mono-data">
@@ -858,7 +909,7 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Rule 4: Breakout check */}
+                {/* Rule 6: Breakout check */}
                 {(() => {
                   const triggered = signal.ruleTriggered === "NO_BREAKOUT";
                   const bestAsset = rankedAssets[0];
@@ -866,11 +917,11 @@ export default function Home() {
                   return (
                     <div className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-300 ${triggered ? "border-amber-500/40 bg-amber-500/8" : "border-border/20 bg-card/20"}`}>
                       <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${triggered ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground"}`} style={{ fontFamily: "Syne, sans-serif" }}>
-                        {triggered ? "!" : "4"}
+                        {triggered ? "!" : "6"}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-foreground/90">Rule 4 — Breakout Check</span>
+                          <span className="text-xs font-semibold text-foreground/90">Rule 6 — Breakout Check</span>
                           {triggered && <span className="text-xs text-amber-400 font-mono">BLOCKED</span>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 mono-data">
@@ -995,14 +1046,14 @@ export default function Home() {
         {/* ── FOOTER ─────────────────────────────────────────────────────────── */}
         <footer className="border-t border-border/20 pt-4 pb-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/50">
-            <p>The Financial Revolution · TREND_CONFIRM v7.0 Conservative · TFR Investing Engine</p>
+            <p>The Financial Revolution · TREND_CONFIRM v7.1 Conservative · TFR Investing Engine</p>
             <p className="mono-data">
               {lastUpdated ? `Last updated: ${lastUpdated.toLocaleTimeString()}` : "Fetching live data..."}
               {" · "}Refreshes every 5 min · Executes 00:05 UTC
             </p>
           </div>
           <p className="text-xs text-muted-foreground/30 mt-2 text-center">
-            For informational purposes only. Not financial advice. Strategy: 30-day momentum · 4-rule decision flow · Confidence Score v3 · Leverage disabled.
+            For informational purposes only. Not financial advice. Strategy: 30-day momentum · 6-rule decision flow · Confidence Score v3 · Leverage disabled.
           </p>
         </footer>
 
