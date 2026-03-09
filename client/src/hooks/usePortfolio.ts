@@ -63,8 +63,10 @@ export interface PortfolioState {
 const STARTING_CAPITAL = 71_400;
 const ACTUAL_ENTRY_PRICE = 67_000;  // Actual BTC purchase price on Day 1
 const ACTUAL_ENTRY_DATE = "2026-03-08"; // Actual purchase date
+const ACTUAL_SELL_PRICE = 67_250;   // Actual BTC sell price on Day 3
+const ACTUAL_SELL_DATE = "2026-03-10"; // Actual sell date
 const MIN_HOLD_DAYS = 14;
-const STORAGE_KEY = "tfr_portfolio_v4";
+const STORAGE_KEY = "tfr_portfolio_v5"; // bumped to v5 to seed sell trade
 
 type Asset = "BTC" | "ETH" | "SOL" | "SUI" | "DOGE";
 
@@ -130,18 +132,25 @@ export function usePortfolio(
     let persisted = loadPersistedPortfolio();
 
     if (!persisted) {
-      // Day 1 — seed with actual trade: BTC purchased at ACTUAL_ENTRY_PRICE on ACTUAL_ENTRY_DATE
+      // Seed with actual trade history:
+      // Day 1 (2026-03-08): BUY BTC at $67,000
+      // Day 3 (2026-03-10): SELL BTC at $67,250 (strategy signal — user executed manually)
       const btcUnits = STARTING_CAPITAL / ACTUAL_ENTRY_PRICE;
-      const initialValue = btcUnits * (btcCurrentPrice > 0 ? btcCurrentPrice : ACTUAL_ENTRY_PRICE);
-      const btcHoldValueDay1 = STARTING_CAPITAL; // same as starting capital since we bought BTC on Day 1
+      const sellProceeds = btcUnits * ACTUAL_SELL_PRICE;
+      const btcHoldValueDay1 = STARTING_CAPITAL;
+      const btcHoldValueSellDay =
+        btcCurrentPrice > 0
+          ? STARTING_CAPITAL * (btcCurrentPrice / ACTUAL_ENTRY_PRICE)
+          : STARTING_CAPITAL;
+
       persisted = {
         startDate: ACTUAL_ENTRY_DATE,
-        btcStartPrice: ACTUAL_ENTRY_PRICE, // BTC price we paid — used for buy-and-hold comparison
-        cash: 0,                           // fully invested
-        heldAsset: "BTC",
-        heldUnits: btcUnits,
-        entryPrice: ACTUAL_ENTRY_PRICE,
-        entryDate: ACTUAL_ENTRY_DATE,
+        btcStartPrice: ACTUAL_ENTRY_PRICE,
+        cash: sellProceeds,   // fully in cash after sell
+        heldAsset: "CASH",
+        heldUnits: 0,
+        entryPrice: 0,
+        entryDate: ACTUAL_SELL_DATE,
         daysHeld: 0,
         tradeLog: [
           {
@@ -152,7 +161,17 @@ export function usePortfolio(
             units: btcUnits,
             valueUsd: STARTING_CAPITAL,
             reason: "Strategy signal: BUY BTC 100% — 30d momentum positive, breakout confirmed",
-            portfolioValueAfter: initialValue,
+            portfolioValueAfter: STARTING_CAPITAL,
+          },
+          {
+            date: ACTUAL_SELL_DATE,
+            action: "SELL",
+            asset: "BTC",
+            price: ACTUAL_SELL_PRICE,
+            units: btcUnits,
+            valueUsd: sellProceeds,
+            reason: "Strategy signal: SELL ALL — manual execution at $67,250",
+            portfolioValueAfter: sellProceeds,
           },
         ],
         equityCurve: [
@@ -163,8 +182,15 @@ export function usePortfolio(
             inCash: false,
             asset: "BTC",
           },
+          {
+            date: ACTUAL_SELL_DATE,
+            value: Math.round(sellProceeds * 100) / 100,
+            btcHoldValue: Math.round(btcHoldValueSellDay * 100) / 100,
+            inCash: true,
+            asset: "CASH",
+          },
         ],
-        lastProcessedDate: today, // already applied — don't re-process today
+        lastProcessedDate: today,
       };
       savePersistedPortfolio(persisted);
     }

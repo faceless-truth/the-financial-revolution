@@ -50,6 +50,11 @@
 - [x] manifest.json updated with separate sized icons
 - [x] apple-touch-icon updated to 180px version
 
+## Portfolio Trade History Fix
+- [x] usePortfolio seeded with BUY at $67,000 (2026-03-08) and SELL at $67,250 (2026-03-10)
+- [x] Portfolio state updated to CASH after sell
+- [x] Storage key bumped to v5 to force re-seed on next page load
+
 ## Future Enhancements
 - [ ] "Remember me" toggle for password (localStorage vs sessionStorage)
 - [ ] Connect to DigitalOcean script output JSON for exact trade matching

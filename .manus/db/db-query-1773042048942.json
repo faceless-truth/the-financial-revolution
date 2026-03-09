@@ -1,0 +1,9 @@
+{
+  "query": "INSERT INTO trade_log (signalAction, asset, tradeType, price, notes, executedAt)\nVALUES ('SELL_ALL', 'BTC', 'sell', '67250.00000000', 'Manual sell — executed at $67,250', UNIX_TIMESTAMP() * 1000);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user NzjNyHLgjfgTM3p.75fe0466651e --database f7qptPGnBE9WgCNPQkiCv7 --execute INSERT INTO trade_log (signalAction, asset, tradeType, price, notes, executedAt)\nVALUES ('SELL_ALL', 'BTC', 'sell', '67250.00000000', 'Manual sell — executed at $67,250', UNIX_TIMESTAMP() * 1000);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1586
+}
