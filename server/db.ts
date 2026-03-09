@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, InsertPushSubscription, pushSubscriptions, signalState, users } from "../drizzle/schema";
+import { InsertUser, InsertPushSubscription, InsertTradeLog, pushSubscriptions, signalState, tradeLog, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -129,4 +129,23 @@ export async function upsertSignalState(action: string, ruleTriggered: string | 
   } else {
     await db.insert(signalState).values({ action, ruleTriggered: ruleTriggered ?? null });
   }
+}
+
+// Trade log helpers
+export async function insertTradeLog(entry: InsertTradeLog): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(tradeLog).values(entry);
+}
+
+export async function getTradeLog(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tradeLog).orderBy(desc(tradeLog.executedAt)).limit(limit);
+}
+
+export async function deleteTradeLogEntry(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(tradeLog).where(eq(tradeLog.id, id));
 }

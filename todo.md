@@ -36,6 +36,18 @@
 - [x] VAPID keys as env vars (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
 - [x] All backend dependencies installed (dotenv, drizzle-orm, mysql2, jose, superjson, @trpc/*)
 
+## Trade Price Entry
+- [x] trade_log database table created and migrated
+- [x] Trade router (getTrades, logTrade, deleteTrade) with tRPC procedures
+- [x] TradeEntryModal — appears automatically when signal changes, pre-fills estimated price
+- [x] TradeLogPanel — full trade history below per-asset cards
+- [x] 10 vitest tests passing (push + trade + auth)
+
+## PWA Icons
+- [x] TFR icon resized to 192×192, 512×512, 180×180 and uploaded to CDN
+- [x] manifest.json updated with separate sized icons
+- [x] apple-touch-icon updated to 180px version
+
 ## Future Enhancements
 - [ ] "Remember me" toggle for password (localStorage vs sessionStorage)
 - [ ] Connect to DigitalOcean script output JSON for exact trade matching

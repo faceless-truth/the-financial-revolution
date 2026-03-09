@@ -44,3 +44,18 @@ export const signalState = mysqlTable("signal_state", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 export type SignalState = typeof signalState.$inferSelect;
+
+// Manual trade log — user records their actual buy/sell prices
+import { decimal, bigint } from "drizzle-orm/mysql-core";
+export const tradeLog = mysqlTable("trade_log", {
+  id: int("id").autoincrement().primaryKey(),
+  signalAction: varchar("signalAction", { length: 32 }).notNull(),  // BUY / SELL_ALL / ROTATE etc
+  asset: varchar("asset", { length: 16 }).notNull(),                // BTC / ETH / CASH etc
+  tradeType: mysqlEnum("tradeType", ["buy", "sell"]).notNull(),
+  price: decimal("price", { precision: 20, scale: 8 }).notNull(),   // actual execution price
+  notes: text("notes"),
+  executedAt: bigint("executedAt", { mode: "number" }).notNull(),   // UTC ms timestamp
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type TradeLog = typeof tradeLog.$inferSelect;
+export type InsertTradeLog = typeof tradeLog.$inferInsert;

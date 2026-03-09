@@ -27,6 +27,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge, Bell, BellOff } from "lucide-react";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { TradeEntryModal } from "@/components/TradeEntryModal";
+import { TradeLogPanel } from "@/components/TradeLogPanel";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/dashboard-hero-bg-hgsqEWzXFhZWuFZbadExQL.webp";
 
@@ -164,6 +166,23 @@ export default function Home() {
     }
     prevSignalRef.current = currentAction;
   }, [signal?.action, storedSignal, reportSignalChange]);
+
+  const [tradeModalOpen, setTradeModalOpen] = useState(false);
+  const [tradeModalSignal, setTradeModalSignal] = useState<{ action: string; asset: string; price?: number } | null>(null);
+
+  // Open trade entry modal when a non-HOLD signal fires
+  const prevActionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!signal) return;
+    const action = signal.action;
+    if (prevActionRef.current !== null && prevActionRef.current !== action && action !== "HOLD") {
+      const topAsset = Object.keys(signal.targetPositions)[0] ?? "CASH";
+      const price = (assets as Record<string, { price: number } | undefined>)[topAsset]?.price;
+      setTradeModalSignal({ action, asset: topAsset, price });
+      setTradeModalOpen(true);
+    }
+    prevActionRef.current = action;
+  }, [signal?.action]);
 
   const btcAsset = assets["BTC"];
   const btcPrice = btcHealth.price;
@@ -820,6 +839,9 @@ export default function Home() {
           </div>
         </div>
 
+        {/* ── Trade Log ───────────────────────────────────────────────────────── */}
+        <TradeLogPanel />
+
         {/* ── FOOTER ─────────────────────────────────────────────────────────── */}
         <footer className="border-t border-border/20 pt-4 pb-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/50">
@@ -835,6 +857,17 @@ export default function Home() {
         </footer>
 
       </div>
+
+      {/* Trade entry modal — appears when signal changes */}
+      {tradeModalSignal && (
+        <TradeEntryModal
+          isOpen={tradeModalOpen}
+          onClose={() => setTradeModalOpen(false)}
+          signalAction={tradeModalSignal.action}
+          targetAsset={tradeModalSignal.asset}
+          estimatedPrice={tradeModalSignal.price}
+        />
+      )}
     </div>
   );
 }
