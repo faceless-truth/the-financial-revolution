@@ -42,6 +42,8 @@
 - [x] TradeEntryModal — appears automatically when signal changes, pre-fills estimated price
 - [x] TradeLogPanel — full trade history below per-asset cards
 - [x] 10 vitest tests passing (push + trade + auth)
+- [x] Trade log rows redesigned: buy/sell price is the hero element (large, colour-coded)
+- [x] "Log my buy/sell price" button added directly inside the Today's Signal panel
 
 ## PWA Icons
 - [x] TFR icon resized to 192×192, 512×512, 180×180 and uploaded to CDN

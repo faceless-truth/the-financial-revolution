@@ -1,5 +1,6 @@
 /**
  * TradeLogPanel — shows the user's manual trade history with actual vs estimated prices.
+ * Price is the hero element on each row.
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -34,6 +35,10 @@ const ASSET_COLORS: Record<string, string> = {
   CASH: "oklch(0.60 0.22 255)",
 };
 
+const ASSET_ICONS: Record<string, string> = {
+  BTC: "₿", ETH: "Ξ", SOL: "◎", SUI: "🌊", DOGE: "Ð", CASH: "$",
+};
+
 export function TradeLogPanel() {
   const [addOpen, setAddOpen] = useState(false);
   const utils = trpc.useUtils();
@@ -54,10 +59,15 @@ export function TradeLogPanel() {
         <div className="flex items-center gap-2">
           <BookOpen size={14} className="text-primary opacity-70" />
           <div>
-            <h2 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground" style={{ fontFamily: "Geist, sans-serif" }}>
+            <h2
+              className="text-xs font-semibold tracking-widest uppercase text-muted-foreground"
+              style={{ fontFamily: "Geist, sans-serif" }}
+            >
               My Trade Log
             </h2>
-            <p className="text-xs text-muted-foreground/50 mt-0.5">Actual execution prices vs strategy signal</p>
+            <p className="text-xs text-muted-foreground/50 mt-0.5">
+              Your actual execution prices vs strategy signal
+            </p>
           </div>
         </div>
         <Button
@@ -75,74 +85,102 @@ export function TradeLogPanel() {
       {isLoading ? (
         <div className="space-y-2">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-14 rounded-lg shimmer" />
+            <div key={i} className="h-16 rounded-lg shimmer" />
           ))}
         </div>
       ) : !trades || trades.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground/40">
           <BookOpen size={28} />
-          <p className="text-xs">No trades logged yet</p>
-          <p className="text-xs">Tap "Log Trade" when a signal fires to record your actual price</p>
+          <p className="text-sm font-semibold">No trades logged yet</p>
+          <p className="text-xs">Tap "Log Trade" to record your actual buy or sell price</p>
         </div>
       ) : (
         <div className="space-y-2">
           {trades.map(trade => {
             const assetColor = ASSET_COLORS[trade.asset] ?? "oklch(0.55 0.010 260)";
             const isBuy = trade.tradeType === "buy";
+            const buyColor = "oklch(0.72 0.18 155)";
+            const sellColor = "oklch(0.62 0.22 25)";
+            const actionColor = isBuy ? buyColor : sellColor;
+
             return (
               <div
                 key={trade.id}
-                className="flex items-center gap-3 p-3 rounded-lg border group"
-                style={{ borderColor: "oklch(1 0 0 / 8%)", background: "oklch(1 0 0 / 3%)" }}
+                className="flex items-center gap-4 p-4 rounded-xl border group transition-all"
+                style={{
+                  borderColor: `${actionColor}25`,
+                  background: `${actionColor}08`,
+                }}
               >
-                {/* Trade type icon */}
-                <div
-                  className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{
-                    background: isBuy ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.62 0.22 25 / 15%)",
-                  }}
-                >
-                  {isBuy
-                    ? <TrendingUp size={14} style={{ color: "oklch(0.72 0.18 155)" }} />
-                    : <TrendingDown size={14} style={{ color: "oklch(0.62 0.22 25)" }} />
-                  }
+                {/* Left: trade type icon + asset */}
+                <div className="flex flex-col items-center gap-1 shrink-0 w-10">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-base"
+                    style={{
+                      background: `${actionColor}18`,
+                      border: `1px solid ${actionColor}30`,
+                    }}
+                  >
+                    {isBuy
+                      ? <TrendingUp size={16} style={{ color: actionColor }} />
+                      : <TrendingDown size={16} style={{ color: actionColor }} />
+                    }
+                  </div>
+                  <span className="text-xs font-bold" style={{ color: assetColor }}>
+                    {ASSET_ICONS[trade.asset] ?? trade.asset}
+                  </span>
                 </div>
 
-                {/* Details */}
+                {/* Centre: signal label + asset name + notes */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-xs font-bold" style={{ color: assetColor, fontFamily: "Syne, sans-serif" }}>
-                      {trade.asset}
-                    </span>
+                  <div className="flex items-center gap-2 mb-1">
                     <span
-                      className="text-xs px-1.5 py-0.5 rounded border font-semibold uppercase"
+                      className="text-xs font-bold px-2 py-0.5 rounded border uppercase tracking-wide"
                       style={{
-                        color: isBuy ? "oklch(0.72 0.18 155)" : "oklch(0.62 0.22 25)",
-                        borderColor: isBuy ? "oklch(0.72 0.18 155 / 30%)" : "oklch(0.62 0.22 25 / 30%)",
-                        background: isBuy ? "oklch(0.72 0.18 155 / 10%)" : "oklch(0.62 0.22 25 / 10%)",
+                        color: actionColor,
+                        borderColor: `${actionColor}35`,
+                        background: `${actionColor}12`,
                         fontSize: "10px",
                       }}
                     >
                       {trade.signalAction.replace("_", " ")}
                     </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-bold mono-data text-foreground">
-                      {formatPrice(trade.price)}
-                    </span>
-                    <span className="text-xs text-muted-foreground/50 mono-data">
-                      {formatDate(trade.executedAt)}
+                    <span
+                      className="text-sm font-bold"
+                      style={{ color: assetColor, fontFamily: "Syne, sans-serif" }}
+                    >
+                      {trade.asset}
                     </span>
                   </div>
+                  <p className="text-xs text-muted-foreground/50 mono-data">
+                    {formatDate(trade.executedAt)}
+                  </p>
                   {trade.notes && (
-                    <p className="text-xs text-muted-foreground/60 mt-0.5 truncate">{trade.notes}</p>
+                    <p className="text-xs text-muted-foreground/60 mt-0.5 truncate italic">
+                      "{trade.notes}"
+                    </p>
                   )}
                 </div>
 
-                {/* Delete */}
+                {/* Right: BIG price — the hero */}
+                <div className="shrink-0 text-right">
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-0.5"
+                    style={{ color: actionColor, fontSize: "9px" }}>
+                    {isBuy ? "BUY PRICE" : "SELL PRICE"}
+                  </p>
+                  <p
+                    className="text-xl font-bold mono-data leading-none"
+                    style={{ color: actionColor, fontFamily: "Syne, sans-serif" }}
+                  >
+                    {formatPrice(trade.price)}
+                  </p>
+                </div>
+
+                {/* Delete (hover) */}
                 <button
                   onClick={() => deleteTrade.mutate({ id: trade.id })}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/40 hover:text-red-400 p-1"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/30 hover:text-red-400 p-1 shrink-0"
+                  title="Delete trade"
                 >
                   <Trash2 size={13} />
                 </button>

@@ -25,7 +25,7 @@ import {
 } from "@/lib/formatters";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge, Bell, BellOff } from "lucide-react";
+import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge, Bell, BellOff, BookOpen } from "lucide-react";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { TradeEntryModal } from "@/components/TradeEntryModal";
 import { TradeLogPanel } from "@/components/TradeLogPanel";
@@ -326,6 +326,25 @@ export default function Home() {
                   </div>
                   <p className="text-xs text-muted-foreground/60">Leverage disabled in v7.0 Conservative</p>
                 </div>
+
+                {/* Log Trade button — always visible in signal panel */}
+                <button
+                  onClick={() => {
+                    const topAsset = Object.keys(signal.targetPositions)[0] ?? "BTC";
+                    const price = (assets as Record<string, { price: number } | undefined>)[topAsset]?.price;
+                    setTradeModalSignal({ action: signal.action, asset: topAsset, price });
+                    setTradeModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border text-xs font-semibold transition-all hover:opacity-80 active:scale-95"
+                  style={{
+                    borderColor: signal.action === "SELL_ALL" ? "oklch(0.62 0.22 25 / 40%)" : "oklch(0.72 0.18 155 / 40%)",
+                    background: signal.action === "SELL_ALL" ? "oklch(0.62 0.22 25 / 10%)" : "oklch(0.72 0.18 155 / 10%)",
+                    color: signal.action === "SELL_ALL" ? "oklch(0.62 0.22 25)" : "oklch(0.72 0.18 155)",
+                  }}
+                >
+                  <BookOpen size={13} />
+                  Log my {signal.action === "SELL_ALL" ? "sell" : "buy"} price
+                </button>
               </div>
             ) : null}
           </div>
