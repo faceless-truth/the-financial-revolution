@@ -248,10 +248,11 @@ export default function Home() {
             <button
               onClick={() => setChangePasswordOpen(true)}
               title="Change password"
-              className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/40 transition-all hover:border-primary/40"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/40 transition-all hover:border-primary/40 text-xs text-muted-foreground hover:text-foreground"
               style={{ background: "oklch(0.13 0.012 260)" }}
             >
-              <Settings size={14} className="text-muted-foreground/60" />
+              <Settings size={13} />
+              <span className="hidden sm:inline">Password</span>
             </button>
           </div>
         </div>
@@ -268,6 +269,14 @@ export default function Home() {
               My Portfolio
             </div>
           </Link>
+          {/* Change password — always visible in tab bar */}
+          <button
+            onClick={() => setChangePasswordOpen(true)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Settings size={13} />
+            Change Password
+          </button>
         </div>
       </div>
 
