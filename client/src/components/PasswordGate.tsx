@@ -12,9 +12,9 @@
 
 import { useState, useEffect } from "react";
 
-const DEFAULT_PASSWORD = "A";
-const SESSION_KEY = "tfr_auth_v1";
-const PASSWORD_KEY = "tfr_password_v1";
+const DEFAULT_PASSWORD = "*c@6$2gZaFUxzu3y";
+const SESSION_KEY = "tfr_auth_v2";
+const PASSWORD_KEY = "tfr_password_v2";
 
 /** Get the current password from localStorage, falling back to default */
 export function getStoredPassword(): string {
