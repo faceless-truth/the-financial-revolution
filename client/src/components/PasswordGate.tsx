@@ -68,28 +68,12 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
       <div className="relative z-10 flex flex-col items-center gap-8">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center"
-            style={{
-              background: "oklch(0.60 0.22 255 / 15%)",
-              border: "1px solid oklch(0.60 0.22 255 / 30%)",
-              boxShadow: "0 0 40px oklch(0.60 0.22 255 / 15%)",
-            }}
-          >
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="oklch(0.75 0.22 255)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="oklch(0.60 0.22 255 / 20%)" />
-            </svg>
-          </div>
-          <div className="text-center">
-            <h1
-              className="text-2xl font-bold tracking-tight text-white"
-              style={{ fontFamily: "Syne, sans-serif" }}
-            >
-              The Financial{" "}
-              <span style={{ color: "oklch(0.75 0.22 255)" }}>Revolution</span>
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">Private strategy dashboard</p>
-          </div>
+          <img
+            src="https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/tfr-logo-modern-v3_cdeb8880.png"
+            alt="The Financial Revolution"
+            className="w-40 h-40 object-contain"
+          />
+          <p className="text-xs text-muted-foreground mt-1">Private strategy dashboard</p>
         </div>
 
         {/* Password form */}

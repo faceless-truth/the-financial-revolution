@@ -198,9 +198,11 @@ export default function Home() {
         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: `url(${HERO_BG})`, backgroundSize: "cover", backgroundPosition: "center top" }} />
         <div className="relative container py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "oklch(0.60 0.22 255 / 20%)", border: "1px solid oklch(0.60 0.22 255 / 30%)" }}>
-              <Zap size={16} className="text-primary" />
-            </div>
+            <img
+              src="https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/tfr-logo-192_03a2d96d.png"
+              alt="TFR"
+              className="w-10 h-10 rounded-lg object-contain"
+            />
             <div>
               <h1 className="text-lg font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>
                 The Financial <span className="text-primary opacity-80">Revolution</span>
