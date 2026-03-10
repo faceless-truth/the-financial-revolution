@@ -1,0 +1,186 @@
+/**
+ * ChangePasswordModal — lets the user change their dashboard password from inside the app
+ * Validates current password, then saves the new one to localStorage via PasswordGate helpers
+ */
+
+import { useState } from "react";
+import { getStoredPassword, setStoredPassword } from "./PasswordGate";
+import { X, Lock, CheckCircle } from "lucide-react";
+
+interface ChangePasswordModalProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
+  const [current, setCurrent] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  function reset() {
+    setCurrent("");
+    setNewPw("");
+    setConfirm("");
+    setError(null);
+    setSuccess(false);
+  }
+
+  function handleClose() {
+    reset();
+    onClose();
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (current !== getStoredPassword()) {
+      setError("Current password is incorrect.");
+      return;
+    }
+    if (newPw.length < 1) {
+      setError("New password cannot be empty.");
+      return;
+    }
+    if (newPw !== confirm) {
+      setError("New passwords do not match.");
+      return;
+    }
+
+    setStoredPassword(newPw);
+    setSuccess(true);
+    setTimeout(() => {
+      handleClose();
+    }, 1800);
+  }
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "oklch(0 0 0 / 70%)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+    >
+      <div
+        className="relative w-full max-w-sm rounded-2xl p-6 flex flex-col gap-5"
+        style={{
+          background: "oklch(0.13 0.012 260)",
+          border: "1px solid oklch(1 0 0 / 10%)",
+          boxShadow: "0 24px 60px oklch(0 0 0 / 60%)",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Lock size={16} style={{ color: "oklch(0.60 0.22 255)" }} />
+            <h2 className="text-sm font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+              Change Password
+            </h2>
+          </div>
+          <button
+            onClick={handleClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-70"
+            style={{ background: "oklch(1 0 0 / 8%)" }}
+          >
+            <X size={14} className="text-muted-foreground" />
+          </button>
+        </div>
+
+        {success ? (
+          <div className="flex flex-col items-center gap-3 py-4">
+            <CheckCircle size={36} className="text-emerald-400" />
+            <p className="text-sm font-semibold text-emerald-400">Password updated successfully</p>
+            <p className="text-xs text-muted-foreground text-center">Your new password is active. Use it next time you unlock the dashboard.</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* Current password */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-muted-foreground">Current Password</label>
+              <input
+                type="password"
+                value={current}
+                onChange={(e) => { setCurrent(e.target.value); setError(null); }}
+                placeholder="Enter current password"
+                autoFocus
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+                style={{
+                  background: "oklch(0.10 0.010 260)",
+                  border: "1px solid oklch(1 0 0 / 12%)",
+                  fontFamily: "JetBrains Mono, monospace",
+                  letterSpacing: "0.15em",
+                }}
+              />
+            </div>
+
+            {/* New password */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-muted-foreground">New Password</label>
+              <input
+                type="password"
+                value={newPw}
+                onChange={(e) => { setNewPw(e.target.value); setError(null); }}
+                placeholder="Enter new password"
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+                style={{
+                  background: "oklch(0.10 0.010 260)",
+                  border: "1px solid oklch(1 0 0 / 12%)",
+                  fontFamily: "JetBrains Mono, monospace",
+                  letterSpacing: "0.15em",
+                }}
+              />
+            </div>
+
+            {/* Confirm new password */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-muted-foreground">Confirm New Password</label>
+              <input
+                type="password"
+                value={confirm}
+                onChange={(e) => { setConfirm(e.target.value); setError(null); }}
+                placeholder="Repeat new password"
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+                style={{
+                  background: "oklch(0.10 0.010 260)",
+                  border: error && error.includes("match")
+                    ? "1px solid oklch(0.62 0.22 25 / 60%)"
+                    : "1px solid oklch(1 0 0 / 12%)",
+                  fontFamily: "JetBrains Mono, monospace",
+                  letterSpacing: "0.15em",
+                }}
+              />
+            </div>
+
+            {error && (
+              <p className="text-xs text-red-400 -mt-2">{error}</p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-muted-foreground transition-all hover:text-foreground"
+                style={{ background: "oklch(1 0 0 / 6%)", border: "1px solid oklch(1 0 0 / 10%)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+                style={{
+                  background: "oklch(0.60 0.22 255)",
+                  boxShadow: "0 4px 16px oklch(0.60 0.22 255 / 25%)",
+                }}
+              >
+                Update Password
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}

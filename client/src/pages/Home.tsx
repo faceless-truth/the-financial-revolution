@@ -25,10 +25,11 @@ import {
 } from "@/lib/formatters";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge, Bell, BellOff, BookOpen } from "lucide-react";
+import { RefreshCw, TrendingUp, Minus, AlertTriangle, CheckCircle, XCircle, Zap, Target, BarChart2, Activity, Gauge, Bell, BellOff, BookOpen, Settings } from "lucide-react";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { TradeEntryModal } from "@/components/TradeEntryModal";
 import { TradeLogPanel } from "@/components/TradeLogPanel";
+import { ChangePasswordModal } from "@/components/ChangePasswordModal";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/dashboard-hero-bg-hgsqEWzXFhZWuFZbadExQL.webp";
 
@@ -167,6 +168,7 @@ export default function Home() {
     prevSignalRef.current = currentAction;
   }, [signal?.action, storedSignal, reportSignalChange]);
 
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
   const [tradeModalSignal, setTradeModalSignal] = useState<{ action: string; asset: string; price?: number } | null>(null);
 
@@ -240,6 +242,15 @@ export default function Home() {
                 )}
               </button>
             )}
+            {/* Settings — change password */}
+            <button
+              onClick={() => setChangePasswordOpen(true)}
+              title="Change password"
+              className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/40 transition-all hover:border-primary/40"
+              style={{ background: "oklch(0.13 0.012 260)" }}
+            >
+              <Settings size={14} className="text-muted-foreground/60" />
+            </button>
           </div>
         </div>
       </header>
@@ -1069,6 +1080,12 @@ export default function Home() {
           estimatedPrice={tradeModalSignal.price}
         />
       )}
+
+      {/* Change password modal */}
+      <ChangePasswordModal
+        open={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+      />
     </div>
   );
 }

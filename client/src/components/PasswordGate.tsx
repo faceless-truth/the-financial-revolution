@@ -2,14 +2,26 @@
  * PasswordGate — Simple client-side password protection
  * Design: Dark Precision — matches the dashboard aesthetic
  *
- * Password is checked against a hardcoded value.
+ * Password is stored in localStorage (persists across sessions).
+ * Default password is "A" on first use.
  * Unlock state is stored in sessionStorage (cleared when browser tab closes).
  */
 
 import { useState, useEffect } from "react";
 
-const CORRECT_PASSWORD = "A";
+const DEFAULT_PASSWORD = "A";
 const SESSION_KEY = "tfr_auth_v1";
+const PASSWORD_KEY = "tfr_password_v1";
+
+/** Get the current password from localStorage, falling back to default */
+export function getStoredPassword(): string {
+  return localStorage.getItem(PASSWORD_KEY) ?? DEFAULT_PASSWORD;
+}
+
+/** Save a new password to localStorage */
+export function setStoredPassword(newPassword: string): void {
+  localStorage.setItem(PASSWORD_KEY, newPassword);
+}
 
 export default function PasswordGate({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
@@ -26,7 +38,7 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (input === CORRECT_PASSWORD) {
+    if (input === getStoredPassword()) {
       sessionStorage.setItem(SESSION_KEY, "1");
       setUnlocked(true);
     } else {

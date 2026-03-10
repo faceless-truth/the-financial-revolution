@@ -76,3 +76,10 @@
 - [x] Home.tsx: add All-Negative indicator in signal/BTC Health panel
 - [x] Home.tsx: update rule labels in signal display (Rule 3=ALL_NEGATIVE, renumber others)
 - [x] Home.tsx: update backtest stats to v7.1 figures (CAGR 10.1%, Sharpe 0.437, Max DD -47.4%)
+
+## Change Password Feature
+- [x] Change Password modal accessible from inside the dashboard after login
+- [x] Validates current password before allowing change
+- [x] Saves new password to localStorage
+- [x] Shows success confirmation
+- [x] Settings gear icon added to dashboard header (next to bell)
