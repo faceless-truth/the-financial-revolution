@@ -5,6 +5,9 @@
  * Password is stored in localStorage (persists across sessions).
  * Default password is "A" on first use.
  * Unlock state is stored in sessionStorage (cleared when browser tab closes).
+ *
+ * Password manager support: proper <form>, id, name, and autocomplete attributes
+ * allow 1Password, Bitwarden, Safari Passwords, etc. to detect and autofill.
  */
 
 import { useState, useEffect } from "react";
@@ -76,17 +79,38 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
           <p className="text-xs text-muted-foreground mt-1">Private strategy dashboard</p>
         </div>
 
-        {/* Password form */}
+        {/* Password form — proper semantics for password manager detection */}
         <form
           onSubmit={handleSubmit}
+          method="post"
+          action="#"
           className={`flex flex-col gap-4 w-72 ${shaking ? "animate-[shake_0.5s_ease-in-out]" : ""}`}
           style={{
             animation: shaking ? "shake 0.5s ease-in-out" : undefined,
           }}
         >
+          {/*
+            Hidden username field: password managers (1Password, Bitwarden, Safari)
+            require a username field to associate the credential with a site.
+            We use a fixed value since this is a single-user dashboard.
+          */}
+          <input
+            type="text"
+            id="tfr-username"
+            name="username"
+            autoComplete="username"
+            value="tfr-dashboard"
+            readOnly
+            aria-hidden="true"
+            style={{ display: "none" }}
+          />
+
           <div className="relative">
             <input
+              id="tfr-password"
+              name="password"
               type="password"
+              autoComplete="current-password"
               value={input}
               onChange={(e) => { setInput(e.target.value); setError(false); }}
               placeholder="Enter password"

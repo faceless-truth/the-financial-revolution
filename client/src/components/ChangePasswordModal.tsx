@@ -1,6 +1,9 @@
 /**
  * ChangePasswordModal — lets the user change their dashboard password from inside the app
  * Validates current password, then saves the new one to localStorage via PasswordGate helpers
+ *
+ * Password manager support: proper id, name, and autocomplete attributes allow
+ * 1Password, Bitwarden, Safari Passwords, etc. to offer to save the new credential.
  */
 
 import { useState } from "react";
@@ -96,12 +99,32 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
             <p className="text-xs text-muted-foreground text-center">Your new password is active. Use it next time you unlock the dashboard.</p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          /*
+            method="post" + action="#" + proper autocomplete values tell password managers
+            (1Password, Bitwarden, Safari, Chrome) that this is a real password-change form
+            and prompts them to update the saved credential.
+          */
+          <form onSubmit={handleSubmit} method="post" action="#" className="flex flex-col gap-4">
+            {/* Hidden username so password managers can match the credential */}
+            <input
+              type="text"
+              id="cp-username"
+              name="username"
+              autoComplete="username"
+              value="tfr-dashboard"
+              readOnly
+              aria-hidden="true"
+              style={{ display: "none" }}
+            />
+
             {/* Current password */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-muted-foreground">Current Password</label>
+              <label htmlFor="cp-current" className="text-xs text-muted-foreground">Current Password</label>
               <input
+                id="cp-current"
+                name="current-password"
                 type="password"
+                autoComplete="current-password"
                 value={current}
                 onChange={(e) => { setCurrent(e.target.value); setError(null); }}
                 placeholder="Enter current password"
@@ -118,9 +141,12 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
 
             {/* New password */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-muted-foreground">New Password</label>
+              <label htmlFor="cp-new" className="text-xs text-muted-foreground">New Password</label>
               <input
+                id="cp-new"
+                name="new-password"
                 type="password"
+                autoComplete="new-password"
                 value={newPw}
                 onChange={(e) => { setNewPw(e.target.value); setError(null); }}
                 placeholder="Enter new password"
@@ -136,9 +162,12 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
 
             {/* Confirm new password */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-muted-foreground">Confirm New Password</label>
+              <label htmlFor="cp-confirm" className="text-xs text-muted-foreground">Confirm New Password</label>
               <input
+                id="cp-confirm"
+                name="confirm-password"
                 type="password"
+                autoComplete="new-password"
                 value={confirm}
                 onChange={(e) => { setConfirm(e.target.value); setError(null); }}
                 placeholder="Repeat new password"
