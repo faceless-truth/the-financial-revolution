@@ -89,3 +89,7 @@
 - [x] Replace sessionStorage unlock state with httpOnly session cookie (works in all browsers)
 - [x] Update ChangePasswordModal to call server-side change password procedure
 - [x] Keep PasswordGate UI identical but wire to server API
+
+## Emergency Password Reset
+- [ ] Seed simple password hash directly into DB via SQL
+- [ ] Publish so it goes live immediately

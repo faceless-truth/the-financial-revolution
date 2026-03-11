@@ -1,0 +1,9 @@
+{
+  "query": "INSERT INTO app_settings (`key`, `value`, `updatedAt`) VALUES ('dashboard_password_hash', '$2b$10$wMzxBf99vQK4XLb.2OTJg.L1sSp/S4QmVLoL0ukCNVItEksPSLJ72', NOW()) ON DUPLICATE KEY UPDATE `value` = '$2b$10$wMzxBf99vQK4XLb.2OTJg.L1sSp/S4QmVLoL0ukCNVItEksPSLJ72', `updatedAt` = NOW();",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user NzjNyHLgjfgTM3p.75fe0466651e --database f7qptPGnBE9WgCNPQkiCv7 --execute INSERT INTO app_settings (`key`, `value`, `updatedAt`) VALUES ('dashboard_password_hash', '$2b$10$wMzxBf99vQK4XLb.2OTJg.L1sSp/S4QmVLoL0ukCNVItEksPSLJ72', NOW()) ON DUPLICATE KEY UPDATE `value` = '$2b$10$wMzxBf99vQK4XLb.2OTJg.L1sSp/S4QmVLoL0ukCNVItEksPSLJ72', `updatedAt` = NOW();",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1614
+}
