@@ -1,72 +1,107 @@
 /**
- * PasswordGate — Server-side password protection
+ * PasswordGate — Client-side password protection
  *
- * Password is verified server-side (bcrypt hash stored in DB).
- * Unlock state is stored in an httpOnly cookie so it works in:
- *   - Safari Private Browsing
- *   - Brave (aggressive shields)
- *   - Firefox strict ETP
- *   - Any browser that blocks localStorage
+ * Works in ALL browsers including Safari Private Browsing, Brave, Firefox strict mode.
+ * Uses in-memory state (module-level variable) as the source of truth so it never
+ * depends on localStorage or sessionStorage. The password is hardcoded as a SHA-256
+ * hash so it cannot be read from the bundle without knowing the original value.
  *
- * The cookie lasts 30 days so you stay logged in across sessions.
+ * "Remember me" (30 days): stored in localStorage with a try/catch fallback so it
+ * degrades gracefully when storage is blocked (Safari Private).
+ *
  * Password manager support: proper <form>, id, name, and autocomplete attributes.
  */
 
 import { useState } from "react";
-import { trpc } from "@/lib/trpc";
+import { sha256 } from "@/lib/sha256";
+import { getCurrentHash } from "./ChangePasswordModal";
+
+// In-memory unlock flag — survives re-renders but resets on page reload
+// (unless "remember me" is active)
+let _memoryUnlocked = false;
+
+const REMEMBER_KEY = "tfr_remember_v1";
+const REMEMBER_DAYS = 30;
+
+function tryGetRemembered(): boolean {
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    if (!raw) return false;
+    const { expiry } = JSON.parse(raw);
+    if (Date.now() > expiry) {
+      localStorage.removeItem(REMEMBER_KEY);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function trySetRemembered() {
+  try {
+    localStorage.setItem(
+      REMEMBER_KEY,
+      JSON.stringify({ expiry: Date.now() + REMEMBER_DAYS * 86400_000 })
+    );
+  } catch {
+    // Safari Private — silently ignore; in-memory state still works for the session
+  }
+}
+
+function tryClearRemembered() {
+  try {
+    localStorage.removeItem(REMEMBER_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function lockDashboard() {
+  _memoryUnlocked = false;
+  tryClearRemembered();
+  window.location.reload();
+}
 
 export default function PasswordGate({ children }: { children: React.ReactNode }) {
-  const [input, setInput] = useState("");
-  const [error, setError] = useState(false);
-  const [shaking, setShaking] = useState(false);
-
-  // Check server-side gate cookie on mount
-  const { data: gateData, isLoading: gateLoading } = trpc.password.checkGate.useQuery(undefined, {
-    retry: false,
-    staleTime: Infinity,
+  const [unlocked, setUnlocked] = useState(() => {
+    if (_memoryUnlocked) return true;
+    if (tryGetRemembered()) {
+      _memoryUnlocked = true;
+      return true;
+    }
+    return false;
   });
 
-  const utils = trpc.useUtils();
+  const [input, setInput] = useState("");
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState(false);
+  const [shaking, setShaking] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-  const unlockMutation = trpc.password.unlock.useMutation({
-    onSuccess: (data) => {
-      if (data.success) {
-        // Invalidate the gate check so it re-fetches and shows the dashboard
-        utils.password.checkGate.invalidate();
-      } else {
-        setError(true);
-        setShaking(true);
-        setInput("");
-        setTimeout(() => setShaking(false), 600);
-      }
-    },
-    onError: () => {
+  // Already unlocked — render children immediately
+  if (unlocked) return <>{children}</>;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!input.trim()) return;
+    setError(false);
+    setChecking(true);
+
+    const hash = await sha256(input.trim());
+    setChecking(false);
+
+    if (hash === getCurrentHash()) {
+      _memoryUnlocked = true;
+      if (remember) trySetRemembered();
+      setUnlocked(true);
+    } else {
       setError(true);
       setShaking(true);
       setInput("");
       setTimeout(() => setShaking(false), 600);
-    },
-  });
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!input.trim()) return;
-    setError(false);
-    unlockMutation.mutate({ password: input });
+    }
   }
-
-  // Show nothing while checking the cookie (fast — just a server round-trip)
-  if (gateLoading) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: "oklch(0.10 0.010 260)" }}
-      />
-    );
-  }
-
-  // Already unlocked via cookie
-  if (gateData?.unlocked) return <>{children}</>;
 
   return (
     <div
@@ -77,7 +112,8 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
       <div
         className="absolute inset-0 opacity-[0.03]"
         style={{
-          backgroundImage: "linear-gradient(oklch(1 0 0) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0) 1px, transparent 1px)",
+          backgroundImage:
+            "linear-gradient(oklch(1 0 0) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0) 1px, transparent 1px)",
           backgroundSize: "40px 40px",
         }}
       />
@@ -93,20 +129,17 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
           <p className="text-xs text-muted-foreground mt-1">Private strategy dashboard</p>
         </div>
 
-        {/* Password form — proper semantics for password manager detection */}
+        {/* Password form */}
         <form
           onSubmit={handleSubmit}
           method="post"
           action="#"
-          className={`flex flex-col gap-4 w-72 ${shaking ? "animate-[shake_0.5s_ease-in-out]" : ""}`}
+          className="flex flex-col gap-4 w-72"
           style={{
             animation: shaking ? "shake 0.5s ease-in-out" : undefined,
           }}
         >
-          {/*
-            Hidden username field: password managers (1Password, Bitwarden, Safari)
-            require a username field to associate the credential with a site.
-          */}
+          {/* Hidden username for password manager association */}
           <input
             type="text"
             id="tfr-username"
@@ -125,10 +158,13 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
               type="password"
               autoComplete="current-password"
               value={input}
-              onChange={(e) => { setInput(e.target.value); setError(false); }}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setError(false);
+              }}
               placeholder="Enter password"
               autoFocus
-              disabled={unlockMutation.isPending}
+              disabled={checking}
               className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all disabled:opacity-50"
               style={{
                 background: "oklch(0.15 0.012 260)",
@@ -152,9 +188,20 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
             </p>
           )}
 
+          {/* Remember me */}
+          <label className="flex items-center gap-2 cursor-pointer select-none -mt-1">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="w-3.5 h-3.5 rounded accent-blue-500"
+            />
+            <span className="text-xs text-muted-foreground">Remember me for 30 days</span>
+          </label>
+
           <button
             type="submit"
-            disabled={unlockMutation.isPending}
+            disabled={checking}
             className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
             style={{
               fontFamily: "Syne, sans-serif",
@@ -162,7 +209,7 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
               boxShadow: "0 4px 20px oklch(0.60 0.22 255 / 30%)",
             }}
           >
-            {unlockMutation.isPending ? "Unlocking…" : "Unlock"}
+            {checking ? "Checking…" : "Unlock"}
           </button>
         </form>
 
