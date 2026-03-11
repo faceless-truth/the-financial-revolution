@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, InsertPushSubscription, InsertTradeLog, pushSubscriptions, signalState, tradeLog, users } from "../drizzle/schema";
+import { InsertUser, InsertPushSubscription, InsertTradeLog, appSettings, pushSubscriptions, signalState, tradeLog, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -148,4 +148,20 @@ export async function deleteTradeLogEntry(id: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.delete(tradeLog).where(eq(tradeLog.id, id));
+}
+
+// App settings helpers
+export async function getAppSetting(key: string): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(appSettings).where(eq(appSettings.key, key)).limit(1);
+  return rows.length > 0 ? rows[0].value : null;
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(appSettings)
+    .values({ key, value })
+    .onDuplicateKeyUpdate({ set: { value } });
 }

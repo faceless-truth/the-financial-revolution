@@ -83,3 +83,9 @@
 - [x] Saves new password to localStorage
 - [x] Shows success confirmation
 - [x] Settings gear icon added to dashboard header (next to bell)
+
+## Safari Private Browsing Fix
+- [x] Move password verification to server-side tRPC procedure (bcrypt hash stored in DB)
+- [x] Replace sessionStorage unlock state with httpOnly session cookie (works in all browsers)
+- [x] Update ChangePasswordModal to call server-side change password procedure
+- [x] Keep PasswordGate UI identical but wire to server API

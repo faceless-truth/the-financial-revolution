@@ -1,58 +1,72 @@
 /**
- * PasswordGate — Simple client-side password protection
- * Design: Dark Precision — matches the dashboard aesthetic
+ * PasswordGate — Server-side password protection
  *
- * Password is stored in localStorage (persists across sessions).
- * Default password is "A" on first use.
- * Unlock state is stored in sessionStorage (cleared when browser tab closes).
+ * Password is verified server-side (bcrypt hash stored in DB).
+ * Unlock state is stored in an httpOnly cookie so it works in:
+ *   - Safari Private Browsing
+ *   - Brave (aggressive shields)
+ *   - Firefox strict ETP
+ *   - Any browser that blocks localStorage
  *
- * Password manager support: proper <form>, id, name, and autocomplete attributes
- * allow 1Password, Bitwarden, Safari Passwords, etc. to detect and autofill.
+ * The cookie lasts 30 days so you stay logged in across sessions.
+ * Password manager support: proper <form>, id, name, and autocomplete attributes.
  */
 
-import { useState, useEffect } from "react";
-
-const DEFAULT_PASSWORD = "*c@6$2gZaFUxzu3y";
-const SESSION_KEY = "tfr_auth_v2";
-const PASSWORD_KEY = "tfr_password_v2";
-
-/** Get the current password from localStorage, falling back to default */
-export function getStoredPassword(): string {
-  return localStorage.getItem(PASSWORD_KEY) ?? DEFAULT_PASSWORD;
-}
-
-/** Save a new password to localStorage */
-export function setStoredPassword(newPassword: string): void {
-  localStorage.setItem(PASSWORD_KEY, newPassword);
-}
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
 
 export default function PasswordGate({ children }: { children: React.ReactNode }) {
-  const [unlocked, setUnlocked] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState(false);
   const [shaking, setShaking] = useState(false);
 
-  // Check sessionStorage on mount
-  useEffect(() => {
-    if (sessionStorage.getItem(SESSION_KEY) === "1") {
-      setUnlocked(true);
-    }
-  }, []);
+  // Check server-side gate cookie on mount
+  const { data: gateData, isLoading: gateLoading } = trpc.password.checkGate.useQuery(undefined, {
+    retry: false,
+    staleTime: Infinity,
+  });
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (input === getStoredPassword()) {
-      sessionStorage.setItem(SESSION_KEY, "1");
-      setUnlocked(true);
-    } else {
+  const utils = trpc.useUtils();
+
+  const unlockMutation = trpc.password.unlock.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        // Invalidate the gate check so it re-fetches and shows the dashboard
+        utils.password.checkGate.invalidate();
+      } else {
+        setError(true);
+        setShaking(true);
+        setInput("");
+        setTimeout(() => setShaking(false), 600);
+      }
+    },
+    onError: () => {
       setError(true);
       setShaking(true);
       setInput("");
       setTimeout(() => setShaking(false), 600);
-    }
+    },
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!input.trim()) return;
+    setError(false);
+    unlockMutation.mutate({ password: input });
   }
 
-  if (unlocked) return <>{children}</>;
+  // Show nothing while checking the cookie (fast — just a server round-trip)
+  if (gateLoading) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: "oklch(0.10 0.010 260)" }}
+      />
+    );
+  }
+
+  // Already unlocked via cookie
+  if (gateData?.unlocked) return <>{children}</>;
 
   return (
     <div
@@ -92,7 +106,6 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
           {/*
             Hidden username field: password managers (1Password, Bitwarden, Safari)
             require a username field to associate the credential with a site.
-            We use a fixed value since this is a single-user dashboard.
           */}
           <input
             type="text"
@@ -115,7 +128,8 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
               onChange={(e) => { setInput(e.target.value); setError(false); }}
               placeholder="Enter password"
               autoFocus
-              className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+              disabled={unlockMutation.isPending}
+              className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all disabled:opacity-50"
               style={{
                 background: "oklch(0.15 0.012 260)",
                 border: error
@@ -140,14 +154,15 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
 
           <button
             type="submit"
-            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+            disabled={unlockMutation.isPending}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
             style={{
               fontFamily: "Syne, sans-serif",
               background: "oklch(0.60 0.22 255)",
               boxShadow: "0 4px 20px oklch(0.60 0.22 255 / 30%)",
             }}
           >
-            Unlock
+            {unlockMutation.isPending ? "Unlocking…" : "Unlock"}
           </button>
         </form>
 

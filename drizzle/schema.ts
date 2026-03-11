@@ -59,3 +59,11 @@ export const tradeLog = mysqlTable("trade_log", {
 });
 export type TradeLog = typeof tradeLog.$inferSelect;
 export type InsertTradeLog = typeof tradeLog.$inferInsert;
+
+// App settings — key/value store for server-side configuration (e.g. password hash)
+export const appSettings = mysqlTable("app_settings", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type AppSetting = typeof appSettings.$inferSelect;

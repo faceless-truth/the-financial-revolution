@@ -1,13 +1,13 @@
 /**
  * ChangePasswordModal — lets the user change their dashboard password from inside the app
- * Validates current password, then saves the new one to localStorage via PasswordGate helpers
+ * Validates current password server-side (bcrypt), then saves the new hash to the DB.
  *
  * Password manager support: proper id, name, and autocomplete attributes allow
  * 1Password, Bitwarden, Safari Passwords, etc. to offer to save the new credential.
  */
 
 import { useState } from "react";
-import { getStoredPassword, setStoredPassword } from "./PasswordGate";
+import { trpc } from "@/lib/trpc";
 import { X, Lock, CheckCircle } from "lucide-react";
 
 interface ChangePasswordModalProps {
@@ -21,6 +21,23 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const changePasswordMutation = trpc.password.changePassword.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        setSuccess(true);
+        setTimeout(() => {
+          reset();
+          onClose();
+        }, 1800);
+      } else {
+        setError(data.error ?? "Failed to change password.");
+      }
+    },
+    onError: () => {
+      setError("Something went wrong. Please try again.");
+    },
+  });
 
   function reset() {
     setCurrent("");
@@ -39,10 +56,6 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
     e.preventDefault();
     setError(null);
 
-    if (current !== getStoredPassword()) {
-      setError("Current password is incorrect.");
-      return;
-    }
     if (newPw.length < 1) {
       setError("New password cannot be empty.");
       return;
@@ -52,11 +65,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       return;
     }
 
-    setStoredPassword(newPw);
-    setSuccess(true);
-    setTimeout(() => {
-      handleClose();
-    }, 1800);
+    changePasswordMutation.mutate({ currentPassword: current, newPassword: newPw });
   }
 
   if (!open) return null;
@@ -129,7 +138,8 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
                 onChange={(e) => { setCurrent(e.target.value); setError(null); }}
                 placeholder="Enter current password"
                 autoFocus
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+                disabled={changePasswordMutation.isPending}
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all disabled:opacity-50"
                 style={{
                   background: "oklch(0.10 0.010 260)",
                   border: "1px solid oklch(1 0 0 / 12%)",
@@ -150,7 +160,8 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
                 value={newPw}
                 onChange={(e) => { setNewPw(e.target.value); setError(null); }}
                 placeholder="Enter new password"
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+                disabled={changePasswordMutation.isPending}
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all disabled:opacity-50"
                 style={{
                   background: "oklch(0.10 0.010 260)",
                   border: "1px solid oklch(1 0 0 / 12%)",
@@ -171,7 +182,8 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
                 value={confirm}
                 onChange={(e) => { setConfirm(e.target.value); setError(null); }}
                 placeholder="Repeat new password"
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all"
+                disabled={changePasswordMutation.isPending}
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-white placeholder:text-muted-foreground/40 outline-none transition-all disabled:opacity-50"
                 style={{
                   background: "oklch(0.10 0.010 260)",
                   border: error && error.includes("match")
@@ -191,20 +203,22 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
               <button
                 type="button"
                 onClick={handleClose}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-muted-foreground transition-all hover:text-foreground"
+                disabled={changePasswordMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-muted-foreground transition-all hover:text-foreground disabled:opacity-50"
                 style={{ background: "oklch(1 0 0 / 6%)", border: "1px solid oklch(1 0 0 / 10%)" }}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+                disabled={changePasswordMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
                 style={{
                   background: "oklch(0.60 0.22 255)",
                   boxShadow: "0 4px 16px oklch(0.60 0.22 255 / 25%)",
                 }}
               >
-                Update Password
+                {changePasswordMutation.isPending ? "Saving…" : "Update Password"}
               </button>
             </div>
           </form>
