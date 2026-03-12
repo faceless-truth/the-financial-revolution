@@ -11,6 +11,8 @@ import { useBinanceData } from "@/hooks/useBinanceData";
 import { usePortfolio, resetPortfolio } from "@/hooks/usePortfolio";
 import { formatPrice, formatPct, formatLargeNumber, timeAgo } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
+import { tradeStore, type Trade } from "@/lib/tradeStore";
+import { useState, useEffect } from "react";
 import {
   AreaChart,
   Area,
@@ -126,6 +128,16 @@ export default function Portfolio() {
   const portfolio = usePortfolio(signal, rawData);
 
   const loading = dataLoading || portfolio.loading;
+
+  // Manually logged trades from tradeStore (localStorage)
+  const [manualTrades, setManualTrades] = useState<Trade[]>([]);
+  useEffect(() => {
+    setManualTrades(tradeStore.getAll(100));
+    // Refresh if user navigates back to this tab
+    const onFocus = () => setManualTrades(tradeStore.getAll(100));
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // Next execution countdown
   const nextExec = portfolio.nextActionDate ? new Date(portfolio.nextActionDate) : null;
@@ -585,29 +597,25 @@ export default function Portfolio() {
           </div>
         </div>
 
-        {/* ── ROW 4: Trade Log ─────────────────────────────────────────────── */}
+        {/* ── ROW 4: Manually Logged Trades ─────────────────────────────── */}
         <div className="panel p-5">
           <div className="flex items-center gap-2 mb-4">
             <BarChart2 size={14} className="text-primary opacity-70" />
             <h2 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground" style={{ fontFamily: "Geist, sans-serif" }}>
-              Trade Log
+              My Logged Trades
             </h2>
             <span className="text-xs text-muted-foreground/50 ml-auto">
-              {portfolio.tradeLog.length} trade{portfolio.tradeLog.length !== 1 ? "s" : ""} since Day 1
+              {manualTrades.length} trade{manualTrades.length !== 1 ? "s" : ""} logged
             </span>
           </div>
 
           {loading ? (
             <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-          ) : portfolio.tradeLog.length === 0 ? (
+          ) : manualTrades.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground text-sm">
-              <p className="font-semibold">No trades yet</p>
+              <p className="font-semibold">No trades logged yet</p>
               <p className="text-xs mt-1 text-muted-foreground/50">
-                {signal?.action === "HOLD"
-                  ? "Today's signal is HOLD — strategy stays in cash."
-                  : signal?.action === "BUY"
-                  ? `Today's signal is BUY — first trade will execute at 00:05 UTC.`
-                  : "Trades will appear here after the first 00:05 UTC execution."}
+                Use the &ldquo;Log my buy/sell price&rdquo; button on the Strategy Dashboard to record your actual execution prices.
               </p>
             </div>
           ) : (
@@ -615,42 +623,57 @@ export default function Portfolio() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/20">
-                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Date</th>
-                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Action</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Date &amp; Time</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Type</th>
                     <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Asset</th>
-                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Price</th>
-                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Value</th>
-                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Portfolio After</th>
-                    <th className="text-left py-2 text-muted-foreground/60 font-medium">Reason</th>
+                    <th className="text-right py-2 text-muted-foreground/60 font-medium pr-4">Exec. Price</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium pr-4">Signal</th>
+                    <th className="text-left py-2 text-muted-foreground/60 font-medium">Notes</th>
+                    <th className="text-right py-2 text-muted-foreground/60 font-medium"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...portfolio.tradeLog].reverse().map((trade, i) => (
-                    <tr key={i} className="border-b border-border/10 hover:bg-white/2 transition-colors">
-                      <td className="py-2.5 pr-4 mono-data text-muted-foreground/70">{trade.date}</td>
+                  {manualTrades.map((trade) => (
+                    <tr key={trade.id} className="border-b border-border/10 hover:bg-white/2 transition-colors">
+                      <td className="py-2.5 pr-4 mono-data text-muted-foreground/70 whitespace-nowrap">
+                        {new Date(trade.executedAt).toLocaleString("en-AU", { timeZone: "Australia/Sydney", hour12: true, day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </td>
                       <td className="py-2.5 pr-4">
                         <span
-                          className="px-2 py-0.5 rounded text-xs font-bold"
+                          className="px-2 py-0.5 rounded text-xs font-bold uppercase"
                           style={{
-                            background: trade.action === "BUY" ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.62 0.22 25 / 15%)",
-                            color: trade.action === "BUY" ? "oklch(0.72 0.18 155)" : "oklch(0.72 0.22 25)",
+                            background: trade.tradeType === "buy" ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.62 0.22 25 / 15%)",
+                            color: trade.tradeType === "buy" ? "oklch(0.72 0.18 155)" : "oklch(0.72 0.22 25)",
                           }}
                         >
-                          {trade.action}
+                          {trade.tradeType}
                         </span>
                       </td>
                       <td className="py-2.5 pr-4">
                         <span className="flex items-center gap-1.5">
-                          <span style={{ color: ASSET_COLORS[trade.asset] }}>{ASSET_ICONS[trade.asset]}</span>
+                          <span style={{ color: ASSET_COLORS[trade.asset] }}>{ASSET_ICONS[trade.asset] ?? trade.asset[0]}</span>
                           <span className="font-semibold text-foreground/80">{trade.asset}</span>
                         </span>
                       </td>
-                      <td className="py-2.5 pr-4 text-right mono-data text-foreground/70">{formatPrice(trade.price)}</td>
-                      <td className="py-2.5 pr-4 text-right mono-data text-foreground/80 font-semibold">{formatLargeNumber(trade.valueUsd)}</td>
-                      <td className="py-2.5 pr-4 text-right mono-data font-bold" style={{ color: "oklch(0.72 0.18 155)" }}>
-                        {formatLargeNumber(trade.portfolioValueAfter)}
+                      <td className="py-2.5 pr-4 text-right mono-data text-foreground/80 font-semibold">{formatPrice(trade.price)}</td>
+                      <td className="py-2.5 pr-4">
+                        <span className="text-muted-foreground/60 uppercase text-xs">{trade.signalAction.replace("_", " ")}</span>
                       </td>
-                      <td className="py-2.5 text-muted-foreground/60 max-w-xs truncate">{trade.reason}</td>
+                      <td className="py-2.5 text-muted-foreground/60 max-w-xs truncate">{trade.notes ?? "—"}</td>
+                      <td className="py-2.5 text-right">
+                        <button
+                          onClick={() => {
+                            if (confirm("Delete this trade entry?")) {
+                              tradeStore.remove(trade.id);
+                              setManualTrades(tradeStore.getAll(100));
+                            }
+                          }}
+                          className="text-muted-foreground/30 hover:text-red-400 transition-colors text-xs px-1"
+                          title="Delete trade"
+                        >
+                          ✕
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

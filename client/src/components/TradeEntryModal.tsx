@@ -30,6 +30,8 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
   const [saved, setSaved] = useState(false);
 
   const meta = ACTION_LABELS[signalAction] ?? ACTION_LABELS["BUY"];
+  // Allow user to override the trade direction
+  const [tradeType, setTradeType] = useState<"buy" | "sell">(meta.tradeType);
   const isHighPrice = parseFloat(price) > 100;
 
   const handleSubmit = () => {
@@ -39,7 +41,7 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
     tradeStore.add({
       signalAction,
       asset: targetAsset,
-      tradeType: meta.tradeType,
+      tradeType,
       price: parsedPrice,
       notes: notes.trim() || undefined,
       executedAt: Date.now(),
@@ -89,6 +91,31 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
             className="text-muted-foreground/50 hover:text-foreground transition-colors p-1"
           >
             <X size={16} />
+          </button>
+        </div>
+
+        {/* Buy / Sell toggle */}
+        <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "oklch(1 0 0 / 15%)" }}>
+          <button
+            className="flex-1 py-2 text-xs font-bold transition-all"
+            style={{
+              background: tradeType === "buy" ? "oklch(0.72 0.18 155 / 20%)" : "oklch(1 0 0 / 4%)",
+              color: tradeType === "buy" ? "oklch(0.72 0.18 155)" : "oklch(0.6 0.01 260)",
+              borderRight: "1px solid oklch(1 0 0 / 15%)",
+            }}
+            onClick={() => setTradeType("buy")}
+          >
+            BUY
+          </button>
+          <button
+            className="flex-1 py-2 text-xs font-bold transition-all"
+            style={{
+              background: tradeType === "sell" ? "oklch(0.62 0.22 25 / 20%)" : "oklch(1 0 0 / 4%)",
+              color: tradeType === "sell" ? "oklch(0.72 0.22 25)" : "oklch(0.6 0.01 260)",
+            }}
+            onClick={() => setTradeType("sell")}
+          >
+            SELL
           </button>
         </div>
 

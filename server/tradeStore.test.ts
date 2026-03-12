@@ -89,6 +89,18 @@ describe("tradeStore", () => {
     expect(tradeStore.getAll()).toHaveLength(1);
   });
 
+  it("supports sell tradeType", () => {
+    const t = tradeStore.add({
+      signalAction: "SELL_ALL",
+      asset: "BTC",
+      tradeType: "sell",
+      price: 75000,
+      executedAt: Date.now(),
+    });
+    expect(t.tradeType).toBe("sell");
+    expect(t.signalAction).toBe("SELL_ALL");
+  });
+
   it("stores optional notes", () => {
     const t = tradeStore.add({
       signalAction: "BUY",
