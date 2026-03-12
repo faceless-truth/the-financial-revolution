@@ -167,6 +167,7 @@ export default function Home() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
   const [tradeModalSignal, setTradeModalSignal] = useState<{ action: string; asset: string; price?: number } | null>(null);
+  const [notifHelpOpen, setNotifHelpOpen] = useState(false);
 
   // Open trade entry modal when a non-HOLD signal fires
   const prevActionRef = useRef<string | null>(null);
@@ -223,23 +224,23 @@ export default function Home() {
               <span>{lastUpdated ? timeAgo(lastUpdated) : "Loading..."}</span>
             </div>
             {signal && <SignalBadge action={signal.action} />}
-            {/* Notification bell */}
-            {notifStatus !== "unsupported" && (
-              <button
-                onClick={isSubscribed ? unsubscribe : subscribe}
-                title={isSubscribed ? "Disable push notifications" : "Enable push notifications"}
-                className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/40 transition-all hover:border-primary/40"
-                style={{ background: isSubscribed ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.13 0.012 260)" }}
-              >
-                {notifStatus === "loading" ? (
-                  <RefreshCw size={14} className="animate-spin text-muted-foreground" />
-                ) : isSubscribed ? (
-                  <Bell size={14} className="text-emerald-400" />
-                ) : (
-                  <BellOff size={14} className="text-muted-foreground/50" />
-                )}
-              </button>
-            )}
+            {/* Notification bell — always visible */}
+            <button
+              onClick={notifStatus === "unsupported" ? () => setNotifHelpOpen(true) : (isSubscribed ? unsubscribe : subscribe)}
+              title={notifStatus === "unsupported" ? "How to enable notifications" : isSubscribed ? "Disable push notifications" : "Enable push notifications"}
+              className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/40 transition-all hover:border-primary/40"
+              style={{ background: isSubscribed ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.13 0.012 260)" }}
+            >
+              {notifStatus === "loading" ? (
+                <RefreshCw size={14} className="animate-spin text-muted-foreground" />
+              ) : isSubscribed ? (
+                <Bell size={14} className="text-emerald-400" />
+              ) : notifStatus === "unsupported" ? (
+                <Bell size={14} className="text-muted-foreground/30" />
+              ) : (
+                <BellOff size={14} className="text-muted-foreground/50" />
+              )}
+            </button>
             {/* Settings — change password */}
             <button
               onClick={() => setChangePasswordOpen(true)}
@@ -1093,6 +1094,72 @@ export default function Home() {
         open={changePasswordOpen}
         onClose={() => setChangePasswordOpen(false)}
       />
+
+      {/* iOS notification help modal */}
+      {notifHelpOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "oklch(0 0 0 / 75%)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setNotifHelpOpen(false); }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border p-6 flex flex-col gap-4"
+            style={{
+              background: "oklch(0.11 0.015 255)",
+              borderColor: "oklch(1 0 0 / 12%)",
+              boxShadow: "0 24px 64px oklch(0 0 0 / 60%)",
+            }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2">
+                <Bell size={16} className="text-primary opacity-70" />
+                <h3 className="text-sm font-bold text-foreground" style={{ fontFamily: "Syne, sans-serif" }}>
+                  Enable Notifications on iPhone
+                </h3>
+              </div>
+              <button onClick={() => setNotifHelpOpen(false)} className="text-muted-foreground/50 hover:text-foreground p-1">
+                <XCircle size={16} />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Safari on iPhone only supports notifications when the site is installed as an app on your Home Screen.
+            </p>
+
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "oklch(1 0 0 / 5%)", border: "1px solid oklch(1 0 0 / 8%)" }}>
+                <span className="text-base mt-0.5">1️⃣</span>
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Tap the Share button</p>
+                  <p className="text-xs text-muted-foreground">The square with an arrow at the bottom of Safari</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "oklch(1 0 0 / 5%)", border: "1px solid oklch(1 0 0 / 8%)" }}>
+                <span className="text-base mt-0.5">2️⃣</span>
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Tap "Add to Home Screen"</p>
+                  <p className="text-xs text-muted-foreground">Scroll down in the share sheet to find it</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "oklch(1 0 0 / 5%)", border: "1px solid oklch(1 0 0 / 8%)" }}>
+                <span className="text-base mt-0.5">3️⃣</span>
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Open from your Home Screen</p>
+                  <p className="text-xs text-muted-foreground">Tap the TFR icon, log in, then tap the bell — it will work!</p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setNotifHelpOpen(false)}
+              className="w-full py-2.5 rounded-lg text-xs font-bold text-white transition-all"
+              style={{ background: "oklch(0.60 0.22 255)" }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

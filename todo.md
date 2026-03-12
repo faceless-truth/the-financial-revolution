@@ -101,3 +101,8 @@
 - [x] Fix push notifications to use browser Notification API (no server needed)
 - [x] Test all fixes end-to-end in preview (28 tests passing)
 - [ ] Save checkpoint and publish
+
+## Notification Bell Fix (iPhone)
+- [x] Always show bell icon regardless of Notification API support
+- [x] Show helpful tooltip/modal explaining how to enable on iOS (Add to Home Screen required)
+- [ ] Save checkpoint and publish
