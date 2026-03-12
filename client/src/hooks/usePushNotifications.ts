@@ -1,122 +1,136 @@
 /**
- * usePushNotifications — manages PWA push notification subscription
- * 
+ * usePushNotifications — manages browser push notifications.
+ *
+ * Since the live site is a static deployment (no Express server), this hook
+ * uses the browser Notification API directly instead of server-side web-push.
+ *
  * Flow:
- * 1. Register service worker
- * 2. Request notification permission
- * 3. Subscribe to push via VAPID key from backend
- * 4. Save subscription to backend
- * 5. When signal changes, call notifySignalChange
+ * 1. Request notification permission from the browser
+ * 2. When signal changes, show a browser notification directly
+ * 3. Store last-seen signal in localStorage to detect changes across page loads
+ *
+ * This works in all browsers that support the Notification API (Chrome, Edge,
+ * Firefox, Safari 16.4+). Safari Private Browsing blocks notifications by design.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { trpc } from "@/lib/trpc";
+import { useCallback, useEffect, useState } from "react";
 
 export type NotifStatus = "unsupported" | "default" | "granted" | "denied" | "loading";
+
+const SIGNAL_STATE_KEY = "tfr_last_signal_v1";
+const NOTIF_ENABLED_KEY = "tfr_notif_enabled_v1";
+
+const TFR_ICON = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/tfr-icon_467cb428.png";
+
+function getStoredSignal(): string | null {
+  try { return localStorage.getItem(SIGNAL_STATE_KEY); } catch { return null; }
+}
+
+function storeSignal(action: string): void {
+  try { localStorage.setItem(SIGNAL_STATE_KEY, action); } catch { /* ignore */ }
+}
+
+function getNotifEnabled(): boolean {
+  try { return localStorage.getItem(NOTIF_ENABLED_KEY) === "true"; } catch { return false; }
+}
+
+function setNotifEnabled(v: boolean): void {
+  try { localStorage.setItem(NOTIF_ENABLED_KEY, String(v)); } catch { /* ignore */ }
+}
 
 export function usePushNotifications() {
   const [status, setStatus] = useState<NotifStatus>("default");
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
-  const subscriptionRef = useRef<PushSubscription | null>(null);
 
-  const { data: vapidData } = trpc.push.getVapidKey.useQuery();
-  const subscribeMutation = trpc.push.subscribe.useMutation();
-  const unsubscribeMutation = trpc.push.unsubscribe.useMutation();
-  const notifyMutation = trpc.push.notifySignalChange.useMutation();
-  const { data: storedSignal } = trpc.push.getSignalState.useQuery(undefined, {
-    refetchInterval: 60_000, // Check every minute
-  });
-
-  // Register service worker on mount
+  // Initialise from stored permission + enabled flag
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    if (!("Notification" in window)) {
       setStatus("unsupported");
       return;
     }
-
-    navigator.serviceWorker
-      .register("/sw.js")
-      .then((reg) => {
-        setSwRegistration(reg);
-        // Check if already subscribed
-        return reg.pushManager.getSubscription();
-      })
-      .then((sub) => {
-        if (sub) {
-          subscriptionRef.current = sub;
-          setIsSubscribed(true);
-          setStatus("granted");
-        } else {
-          setStatus(Notification.permission as NotifStatus);
-        }
-      })
-      .catch((err) => {
-        console.error("[SW] Registration failed:", err);
-        setStatus("unsupported");
-      });
+    const perm = Notification.permission as NotifStatus;
+    setStatus(perm);
+    if (perm === "granted" && getNotifEnabled()) {
+      setIsSubscribed(true);
+    }
   }, []);
 
-  // Subscribe to push notifications
+  // Enable notifications — request permission then mark as subscribed
   const subscribe = useCallback(async () => {
-    if (!swRegistration || !vapidData?.publicKey) return;
-
+    if (!("Notification" in window)) {
+      setStatus("unsupported");
+      return;
+    }
     setStatus("loading");
     try {
       const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setStatus("denied");
-        return;
+      setStatus(permission as NotifStatus);
+      if (permission === "granted") {
+        setNotifEnabled(true);
+        setIsSubscribed(true);
+      } else {
+        setIsSubscribed(false);
       }
-
-      const sub = await swRegistration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey),
-      });
-
-      subscriptionRef.current = sub;
-      const subJson = sub.toJSON();
-
-      await subscribeMutation.mutateAsync({
-        endpoint: sub.endpoint,
-        p256dh: subJson.keys?.p256dh ?? "",
-        auth: subJson.keys?.auth ?? "",
-      });
-
-      setIsSubscribed(true);
-      setStatus("granted");
     } catch (err) {
-      console.error("[Push] Subscribe failed:", err);
+      console.error("[Notif] Permission request failed:", err);
       setStatus("denied");
     }
-  }, [swRegistration, vapidData, subscribeMutation]);
+  }, []);
 
-  // Unsubscribe from push notifications
-  const unsubscribe = useCallback(async () => {
-    if (!subscriptionRef.current) return;
+  // Disable notifications
+  const unsubscribe = useCallback(() => {
+    setNotifEnabled(false);
+    setIsSubscribed(false);
+    setStatus(Notification.permission as NotifStatus);
+  }, []);
 
-    try {
-      await unsubscribeMutation.mutateAsync({ endpoint: subscriptionRef.current.endpoint });
-      await subscriptionRef.current.unsubscribe();
-      subscriptionRef.current = null;
-      setIsSubscribed(false);
-      setStatus("default");
-    } catch (err) {
-      console.error("[Push] Unsubscribe failed:", err);
-    }
-  }, [unsubscribeMutation]);
-
-  // Notify backend of signal change (backend handles dedup + fan-out)
+  /**
+   * Call this whenever the dashboard detects a new signal.
+   * Shows a browser notification if the signal changed since last time.
+   */
   const reportSignalChange = useCallback(
-    async (action: string, ruleTriggered: string | null, reason?: string) => {
-      if (!isSubscribed) return;
+    (action: string, _ruleTriggered: string | null, reason?: string) => {
+      const prev = getStoredSignal();
+      const changed = prev !== action;
+
+      // Always update stored signal so we track the latest
+      storeSignal(action);
+
+      if (!changed || !isSubscribed || Notification.permission !== "granted") return;
+
+      const actionLabel = action.replace("_", " ");
+      const prevLabel = prev ? prev.replace("_", " ") : null;
+
+      const title = `TFR Signal: ${actionLabel}`;
+      const body = prevLabel
+        ? `Signal changed from ${prevLabel} → ${actionLabel}. ${reason ?? ""}`
+        : `Strategy signal: ${actionLabel}. ${reason ?? ""}`;
+
       try {
-        await notifyMutation.mutateAsync({ action, ruleTriggered, reason });
+        // Use service worker notification if available (shows even when tab is closed)
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.ready.then((reg) => {
+            reg.showNotification(title, {
+              body,
+              icon: TFR_ICON,
+              badge: TFR_ICON,
+              tag: "tfr-signal",
+            });
+          }).catch(() => {
+            // Fallback to direct Notification API
+            new Notification(title, { body, icon: TFR_ICON });
+          });
+        } else {
+          new Notification(title, { body, icon: TFR_ICON });
+        }
       } catch (err) {
-        console.error("[Push] Notify failed:", err);
+        console.error("[Notif] Failed to show notification:", err);
       }
     },
-    [isSubscribed, notifyMutation]
+    [isSubscribed]
   );
+
+  // Expose storedSignal as null (no longer fetched from server)
+  const storedSignal = null;
 
   return {
     status,
@@ -126,16 +140,4 @@ export function usePushNotifications() {
     unsubscribe,
     reportSignalChange,
   };
-}
-
-// Helper: convert VAPID public key from base64url to Uint8Array
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
 }

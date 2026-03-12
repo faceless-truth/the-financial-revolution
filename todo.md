@@ -93,3 +93,11 @@
 ## Emergency Password Reset
 - [ ] Seed simple password hash directly into DB via SQL
 - [ ] Publish so it goes live immediately
+
+## Trade Log & Push Notification Fix (Live Site)
+- [x] Migrate trade log from tRPC/DB to localStorage (live site has no server)
+- [x] Fix TradeEntryModal to save trades to localStorage
+- [x] Fix TradeLogPanel to read/display trades from localStorage
+- [x] Fix push notifications to use browser Notification API (no server needed)
+- [x] Test all fixes end-to-end in preview (28 tests passing)
+- [ ] Save checkpoint and publish

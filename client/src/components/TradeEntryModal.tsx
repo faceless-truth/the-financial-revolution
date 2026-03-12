@@ -1,11 +1,12 @@
 /**
  * TradeEntryModal — appears when a strategy signal fires.
  * Lets the user log the actual price they executed at (vs the estimated signal price).
+ * Stores trades in localStorage via tradeStore (works on live static site).
  */
 import { useState } from "react";
-import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { CheckCircle, X, DollarSign, FileText, Clock } from "lucide-react";
+import { tradeStore } from "@/lib/tradeStore";
 
 interface TradeEntryModalProps {
   isOpen: boolean;
@@ -28,23 +29,14 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const logTrade = trpc.trade.logTrade.useMutation({
-    onSuccess: () => {
-      setSaved(true);
-      setTimeout(() => {
-        setSaved(false);
-        onClose();
-      }, 1500);
-    },
-  });
-
   const meta = ACTION_LABELS[signalAction] ?? ACTION_LABELS["BUY"];
   const isHighPrice = parseFloat(price) > 100;
 
   const handleSubmit = () => {
     const parsedPrice = parseFloat(price);
     if (!parsedPrice || parsedPrice <= 0) return;
-    logTrade.mutate({
+
+    tradeStore.add({
       signalAction,
       asset: targetAsset,
       tradeType: meta.tradeType,
@@ -52,6 +44,12 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
       notes: notes.trim() || undefined,
       executedAt: Date.now(),
     });
+
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 1500);
   };
 
   if (!isOpen) return null;
@@ -174,20 +172,18 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
             variant="outline"
             className="flex-1 text-xs"
             onClick={onClose}
-            disabled={logTrade.isPending || saved}
+            disabled={saved}
           >
             Skip
           </Button>
           <Button
             className="flex-1 text-xs font-bold"
             onClick={handleSubmit}
-            disabled={!price || parseFloat(price) <= 0 || logTrade.isPending || saved}
+            disabled={!price || parseFloat(price) <= 0 || saved}
             style={{ background: saved ? "oklch(0.72 0.18 155)" : meta.color }}
           >
             {saved ? (
               <span className="flex items-center gap-1.5"><CheckCircle size={13} /> Saved!</span>
-            ) : logTrade.isPending ? (
-              "Saving..."
             ) : (
               "Log Trade"
             )}

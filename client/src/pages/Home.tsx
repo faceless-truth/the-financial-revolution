@@ -155,18 +155,14 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
 
-  // Detect signal changes and notify backend
+  // Detect signal changes and show browser notification
   useEffect(() => {
     if (!signal) return;
     const currentAction = signal.action;
-    // Compare with stored backend signal (source of truth for notifications)
-    if (storedSignal && storedSignal.action !== currentAction) {
-      reportSignalChange(currentAction, signal.ruleTriggered ?? null, signal.reason);
-    } else if (!storedSignal && prevSignalRef.current && prevSignalRef.current !== currentAction) {
-      reportSignalChange(currentAction, signal.ruleTriggered ?? null, signal.reason);
-    }
+    // reportSignalChange handles dedup via localStorage internally
+    reportSignalChange(currentAction, signal.ruleTriggered ?? null, signal.reason);
     prevSignalRef.current = currentAction;
-  }, [signal?.action, storedSignal, reportSignalChange]);
+  }, [signal?.action, reportSignalChange]);
 
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
