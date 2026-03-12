@@ -207,9 +207,11 @@ export default function Home() {
               <p className="text-xs text-muted-foreground">TREND_CONFIRM v7.1 Conservative · Live Binance Data · Executes 00:05 UTC</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          {/* Right side — mobile-first: only essential icons on small screens */}
+          <div className="flex items-center gap-2">
+            {/* BTC price — hidden on mobile */}
             {btcPrice > 0 && (
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border/40" style={{ background: "oklch(0.13 0.012 260)" }}>
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border/40" style={{ background: "oklch(0.13 0.012 260)" }}>
                 <span className="text-amber-400 text-sm font-bold" style={{ fontFamily: "Syne, sans-serif" }}>₿</span>
                 <span className="text-sm font-semibold text-white mono-data">{formatPrice(btcPrice)}</span>
                 {btcAsset && (
@@ -219,37 +221,38 @@ export default function Home() {
                 )}
               </div>
             )}
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {/* Refresh time — hidden on mobile */}
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
               <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
               <span>{lastUpdated ? timeAgo(lastUpdated) : "Loading..."}</span>
             </div>
+            {/* Signal badge — always visible */}
             {signal && <SignalBadge action={signal.action} />}
-            {/* Notification bell — always visible */}
+            {/* Notification bell — always visible, prominent */}
             <button
               onClick={notifStatus === "unsupported" ? () => setNotifHelpOpen(true) : (isSubscribed ? unsubscribe : subscribe)}
-              title={notifStatus === "unsupported" ? "How to enable notifications" : isSubscribed ? "Disable push notifications" : "Enable push notifications"}
-              className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/40 transition-all hover:border-primary/40"
+              title={notifStatus === "unsupported" ? "How to enable notifications" : isSubscribed ? "Disable notifications" : "Enable notifications"}
+              className="flex items-center justify-center w-9 h-9 rounded-lg border border-border/40 transition-all hover:border-primary/40 flex-shrink-0"
               style={{ background: isSubscribed ? "oklch(0.72 0.18 155 / 15%)" : "oklch(0.13 0.012 260)" }}
             >
               {notifStatus === "loading" ? (
-                <RefreshCw size={14} className="animate-spin text-muted-foreground" />
+                <RefreshCw size={15} className="animate-spin text-muted-foreground" />
               ) : isSubscribed ? (
-                <Bell size={14} className="text-emerald-400" />
+                <Bell size={15} className="text-emerald-400" />
               ) : notifStatus === "unsupported" ? (
-                <Bell size={14} className="text-muted-foreground/30" />
+                <Bell size={15} className="text-amber-400/70" />
               ) : (
-                <BellOff size={14} className="text-muted-foreground/50" />
+                <Bell size={15} className="text-muted-foreground/60" />
               )}
             </button>
-            {/* Settings — change password */}
+            {/* Settings — icon only on mobile, text on sm+ */}
             <button
               onClick={() => setChangePasswordOpen(true)}
               title="Change password"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/40 transition-all hover:border-primary/40 text-xs text-muted-foreground hover:text-foreground"
+              className="flex items-center justify-center w-9 h-9 rounded-lg border border-border/40 transition-all hover:border-primary/40 text-muted-foreground hover:text-foreground flex-shrink-0"
               style={{ background: "oklch(0.13 0.012 260)" }}
             >
-              <Settings size={13} />
-              <span className="hidden sm:inline">Password</span>
+              <Settings size={15} />
             </button>
           </div>
         </div>

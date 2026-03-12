@@ -113,3 +113,7 @@
 - [x] Delete button on each trade row
 - [x] 29 tests passing
 - [ ] Save checkpoint and publish
+
+## Header Mobile Fix
+- [x] Fix header layout so bell icon is visible on iPhone (not clipped off-screen)
+- [x] Ensure all header elements fit on small screens (BTC price + refresh time hidden on mobile, bell + settings always visible)
