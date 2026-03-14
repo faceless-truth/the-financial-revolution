@@ -1,18 +1,24 @@
 /**
- * usePortfolio — Portfolio state derived from actual logged trades + live prices.
+ * usePortfolio — Portfolio state derived from persistent trade logs + live prices.
  *
  * Source of truth:
  * 1. Starting capital is fixed.
- * 2. Manual trade logs determine whether the user is currently in CASH or invested.
+ * 2. Server-backed trade logs determine whether the user is currently in CASH or invested.
  * 3. Live Binance prices mark the active position to market in real time.
- *
- * This keeps the Portfolio page aligned with the user's real executions rather than
- * a separate simulated state machine.
  */
 
 import { useMemo } from "react";
 import type { Candle, StrategySignal } from "./useBinanceData";
-import { tradeStore } from "@/lib/tradeStore";
+
+export interface PersistedTrade {
+  id: number;
+  signalAction: string;
+  asset: string;
+  tradeType: "buy" | "sell";
+  price: number;
+  notes?: string | null;
+  executedAt: number;
+}
 
 export interface TradeEntry {
   date: string;
@@ -100,14 +106,12 @@ function inferTargetAsset(tradeType: "buy" | "sell", asset: string, signalAction
 
 export function usePortfolio(
   signal: StrategySignal | null,
-  rawData: Partial<Record<Asset, Candle[]>>
+  rawData: Partial<Record<Asset, Candle[]>>,
+  trades: PersistedTrade[] = []
 ): PortfolioState {
   const portfolio = useMemo<PortfolioState>(() => {
     const today = todayUTC();
-    const manualTrades = tradeStore
-      .getAll(1000)
-      .slice()
-      .sort((a, b) => a.executedAt - b.executedAt);
+    const manualTrades = [...trades].sort((a, b) => a.executedAt - b.executedAt);
 
     const btcCurrentPrice = getLivePrice("BTC", rawData);
     const btcStartPrice = manualTrades.find((t) => t.asset === "BTC" && t.tradeType === "buy")?.price
@@ -129,14 +133,14 @@ export function usePortfolio(
       : DEFAULT_START_DATE;
 
     if (manualTrades.length === 0) {
-      const btcHoldValue = btcStartPrice > 0 && btcCurrentPrice > 0
+      const btcHoldValueAtStart = btcStartPrice > 0 && btcCurrentPrice > 0
         ? round2(STARTING_CAPITAL * (btcCurrentPrice / btcStartPrice))
         : STARTING_CAPITAL;
 
       equityCurve.push({
         date: startDate,
         value: STARTING_CAPITAL,
-        btcHoldValue,
+        btcHoldValue: btcHoldValueAtStart,
         inCash: true,
         asset: "CASH",
       });
@@ -277,16 +281,11 @@ export function usePortfolio(
       daysTracked,
       loading: btcCurrentPrice === 0,
     };
-  }, [signal, rawData]);
+  }, [signal, rawData, trades]);
 
   return portfolio;
 }
 
 export function resetPortfolio(): void {
-  localStorage.removeItem("tfr_trades_v1");
-  localStorage.removeItem("tfr_portfolio_v1");
-  localStorage.removeItem("tfr_portfolio_v2");
-  localStorage.removeItem("tfr_portfolio_v3");
-  localStorage.removeItem("tfr_portfolio_v5");
   window.location.reload();
 }

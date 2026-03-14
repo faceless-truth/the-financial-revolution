@@ -1,12 +1,13 @@
 /**
  * TradeLogPanel — shows the user's manual trade history with actual vs estimated prices.
- * Reads from localStorage via tradeStore (works on live static site).
+ * Reads from the server-backed trade log via tRPC.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Trash2, TrendingUp, TrendingDown, BookOpen, Plus } from "lucide-react";
 import { TradeEntryModal } from "./TradeEntryModal";
-import { tradeStore, type Trade } from "@/lib/tradeStore";
+import { trpc } from "@/lib/trpc";
+import type { PersistedTrade } from "@/hooks/usePortfolio";
 
 function formatPrice(p: number) {
   if (p >= 1000) return `$${p.toLocaleString("en-AU", { maximumFractionDigits: 0 })}`;
@@ -41,19 +42,20 @@ const ASSET_ICONS: Record<string, string> = {
 
 export function TradeLogPanel() {
   const [addOpen, setAddOpen] = useState(false);
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const utils = trpc.useUtils();
 
-  const refresh = useCallback(() => {
-    setTrades(tradeStore.getAll(50));
-  }, []);
+  const tradesQuery = trpc.trade.getTrades.useQuery({ limit: 50 });
+  const deleteTradeMutation = trpc.trade.deleteTrade.useMutation({
+    onSuccess: async () => {
+      await utils.trade.getTrades.invalidate();
+    },
+  });
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const trades: PersistedTrade[] = tradesQuery.data ?? [];
 
-  const handleDelete = (id: string) => {
-    tradeStore.remove(id);
-    refresh();
+  const handleDelete = (id: number) => {
+    if (deleteTradeMutation.isPending) return;
+    deleteTradeMutation.mutate({ id });
   };
 
   return (
@@ -61,7 +63,6 @@ export function TradeLogPanel() {
       className="panel p-5 flex flex-col gap-4"
       style={{ borderColor: "oklch(0.60 0.22 255 / 20%)" }}
     >
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <BookOpen size={14} className="text-primary opacity-70" />
@@ -88,8 +89,12 @@ export function TradeLogPanel() {
         </Button>
       </div>
 
-      {/* Trade list */}
-      {trades.length === 0 ? (
+      {tradesQuery.isLoading ? (
+        <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground/40">
+          <BookOpen size={28} />
+          <p className="text-sm font-semibold">Loading trades...</p>
+        </div>
+      ) : trades.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground/40">
           <BookOpen size={28} />
           <p className="text-sm font-semibold">No trades logged yet</p>
@@ -113,7 +118,6 @@ export function TradeLogPanel() {
                   background: `${actionColor}08`,
                 }}
               >
-                {/* Left: trade type icon + asset */}
                 <div className="flex flex-col items-center gap-1 shrink-0 w-10">
                   <div
                     className="w-9 h-9 rounded-xl flex items-center justify-center text-base"
@@ -132,7 +136,6 @@ export function TradeLogPanel() {
                   </span>
                 </div>
 
-                {/* Centre: signal label + asset name + notes */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <span
@@ -163,7 +166,6 @@ export function TradeLogPanel() {
                   )}
                 </div>
 
-                {/* Right: BIG price — the hero */}
                 <div className="shrink-0 text-right">
                   <p className="text-xs font-semibold uppercase tracking-wider mb-0.5"
                     style={{ color: actionColor, fontSize: "9px" }}>
@@ -177,11 +179,11 @@ export function TradeLogPanel() {
                   </p>
                 </div>
 
-                {/* Delete (hover) */}
                 <button
                   onClick={() => handleDelete(trade.id)}
                   className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/30 hover:text-red-400 p-1 shrink-0"
                   title="Delete trade"
+                  disabled={deleteTradeMutation.isPending}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -191,10 +193,9 @@ export function TradeLogPanel() {
         </div>
       )}
 
-      {/* Quick-add modal (manual entry without a signal) */}
       <TradeEntryModal
         isOpen={addOpen}
-        onClose={() => { setAddOpen(false); refresh(); }}
+        onClose={() => { setAddOpen(false); void utils.trade.getTrades.invalidate(); }}
         signalAction="BUY"
         targetAsset="BTC"
       />

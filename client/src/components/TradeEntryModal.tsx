@@ -1,27 +1,27 @@
 /**
  * TradeEntryModal — appears when a strategy signal fires.
  * Lets the user log the actual price they executed at (vs the estimated signal price).
- * Stores trades in localStorage via tradeStore (works on live static site).
+ * Persists trades via the server-backed tRPC trade log.
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CheckCircle, X, DollarSign, FileText, Clock } from "lucide-react";
-import { tradeStore } from "@/lib/tradeStore";
+import { trpc } from "@/lib/trpc";
 
 interface TradeEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  signalAction: string;       // e.g. "BUY", "SELL_ALL", "ROTATE"
-  targetAsset: string;        // e.g. "BTC", "ETH", "CASH"
-  estimatedPrice?: number;    // the live price at signal time
+  signalAction: string;
+  targetAsset: string;
+  estimatedPrice?: number;
 }
 
 const ACTION_LABELS: Record<string, { label: string; tradeType: "buy" | "sell"; color: string }> = {
-  BUY:      { label: "Buy",       tradeType: "buy",  color: "oklch(0.72 0.18 155)" },
-  ROTATE:   { label: "Rotate",    tradeType: "buy",  color: "oklch(0.78 0.18 75)" },
-  REBALANCE:{ label: "Rebalance", tradeType: "buy",  color: "oklch(0.60 0.22 255)" },
-  SELL_ALL: { label: "Sell All",  tradeType: "sell", color: "oklch(0.62 0.22 25)" },
-  HOLD:     { label: "Hold",      tradeType: "buy",  color: "oklch(0.55 0.010 260)" },
+  BUY: { label: "Buy", tradeType: "buy", color: "oklch(0.72 0.18 155)" },
+  ROTATE: { label: "Rotate", tradeType: "buy", color: "oklch(0.78 0.18 75)" },
+  REBALANCE: { label: "Rebalance", tradeType: "buy", color: "oklch(0.60 0.22 255)" },
+  SELL_ALL: { label: "Sell All", tradeType: "sell", color: "oklch(0.62 0.22 25)" },
+  HOLD: { label: "Hold", tradeType: "buy", color: "oklch(0.55 0.010 260)" },
 };
 
 export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, estimatedPrice }: TradeEntryModalProps) {
@@ -29,16 +29,27 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
 
+  const utils = trpc.useUtils();
+  const logTradeMutation = trpc.trade.logTrade.useMutation({
+    onSuccess: async () => {
+      await utils.trade.getTrades.invalidate();
+      setSaved(true);
+      setTimeout(() => {
+        setSaved(false);
+        onClose();
+      }, 1500);
+    },
+  });
+
   const meta = ACTION_LABELS[signalAction] ?? ACTION_LABELS["BUY"];
-  // Allow user to override the trade direction
   const [tradeType, setTradeType] = useState<"buy" | "sell">(meta.tradeType);
   const isHighPrice = parseFloat(price) > 100;
 
   const handleSubmit = () => {
     const parsedPrice = parseFloat(price);
-    if (!parsedPrice || parsedPrice <= 0) return;
+    if (!parsedPrice || parsedPrice <= 0 || logTradeMutation.isPending) return;
 
-    tradeStore.add({
+    logTradeMutation.mutate({
       signalAction,
       asset: targetAsset,
       tradeType,
@@ -46,12 +57,6 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
       notes: notes.trim() || undefined,
       executedAt: Date.now(),
     });
-
-    setSaved(true);
-    setTimeout(() => {
-      setSaved(false);
-      onClose();
-    }, 1500);
   };
 
   if (!isOpen) return null;
@@ -70,7 +75,6 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
           boxShadow: "0 24px 64px oklch(0 0 0 / 60%)",
         }}
       >
-        {/* Header */}
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -94,7 +98,6 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
           </button>
         </div>
 
-        {/* Buy / Sell toggle */}
         <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "oklch(1 0 0 / 15%)" }}>
           <button
             className="flex-1 py-2 text-xs font-bold transition-all"
@@ -119,7 +122,6 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
           </button>
         </div>
 
-        {/* Estimated price reference */}
         {estimatedPrice && (
           <div
             className="flex items-center justify-between px-3 py-2 rounded-lg border"
@@ -132,7 +134,6 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
           </div>
         )}
 
-        {/* Price input */}
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground flex items-center gap-1.5">
             <DollarSign size={11} />
@@ -168,7 +169,6 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
           )}
         </div>
 
-        {/* Notes */}
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground flex items-center gap-1.5">
             <FileText size={11} />
@@ -187,30 +187,36 @@ export function TradeEntryModal({ isOpen, onClose, signalAction, targetAsset, es
           />
         </div>
 
-        {/* Timestamp note */}
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
           <Clock size={10} />
           <span>Will be logged at {new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney", hour12: true })}</span>
         </div>
 
-        {/* Actions */}
+        {logTradeMutation.error ? (
+          <p className="text-xs" style={{ color: "oklch(0.72 0.22 25)" }}>
+            Could not save trade. Please try again.
+          </p>
+        ) : null}
+
         <div className="flex gap-3">
           <Button
             variant="outline"
             className="flex-1 text-xs"
             onClick={onClose}
-            disabled={saved}
+            disabled={saved || logTradeMutation.isPending}
           >
             Skip
           </Button>
           <Button
             className="flex-1 text-xs font-bold"
             onClick={handleSubmit}
-            disabled={!price || parseFloat(price) <= 0 || saved}
+            disabled={!price || parseFloat(price) <= 0 || saved || logTradeMutation.isPending}
             style={{ background: saved ? "oklch(0.72 0.18 155)" : meta.color }}
           >
             {saved ? (
               <span className="flex items-center gap-1.5"><CheckCircle size={13} /> Saved!</span>
+            ) : logTradeMutation.isPending ? (
+              "Saving..."
             ) : (
               "Log Trade"
             )}

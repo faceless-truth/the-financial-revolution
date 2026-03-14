@@ -8,11 +8,10 @@
  */
 
 import { useBinanceData } from "@/hooks/useBinanceData";
-import { usePortfolio, resetPortfolio } from "@/hooks/usePortfolio";
+import { usePortfolio, resetPortfolio, type PersistedTrade } from "@/hooks/usePortfolio";
 import { formatPrice, formatPct, formatLargeNumber, timeAgo } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
-import { tradeStore, type Trade } from "@/lib/tradeStore";
-import { useState, useEffect } from "react";
+import { trpc } from "@/lib/trpc";
 import {
   AreaChart,
   Area,
@@ -124,20 +123,19 @@ function EquityTooltip({ active, payload, label }: any) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function Portfolio() {
+  const utils = trpc.useUtils();
   const { signal, loading: dataLoading, lastUpdated, rawData } = useBinanceData(5 * 60 * 1000);
-  const portfolio = usePortfolio(signal, rawData);
+  const manualTradesQuery = trpc.trade.getTrades.useQuery({ limit: 100 });
+  const deleteTradeMutation = trpc.trade.deleteTrade.useMutation({
+    onSuccess: async () => {
+      await utils.trade.getTrades.invalidate();
+    },
+  });
 
-  const loading = dataLoading || portfolio.loading;
+  const manualTrades: PersistedTrade[] = manualTradesQuery.data ?? [];
+  const portfolio = usePortfolio(signal, rawData, manualTrades);
 
-  // Manually logged trades from tradeStore (localStorage)
-  const [manualTrades, setManualTrades] = useState<Trade[]>([]);
-  useEffect(() => {
-    setManualTrades(tradeStore.getAll(100));
-    // Refresh if user navigates back to this tab
-    const onFocus = () => setManualTrades(tradeStore.getAll(100));
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  const loading = dataLoading || portfolio.loading || manualTradesQuery.isLoading;
 
   // Next execution countdown
   const nextExec = portfolio.nextActionDate ? new Date(portfolio.nextActionDate) : null;
@@ -689,8 +687,7 @@ export default function Portfolio() {
                         <button
                           onClick={() => {
                             if (confirm("Delete this trade entry?")) {
-                              tradeStore.remove(trade.id);
-                              setManualTrades(tradeStore.getAll(100));
+                              deleteTradeMutation.mutate({ id: trade.id });
                             }
                           }}
                           className="text-muted-foreground/30 hover:text-red-400 transition-colors text-xs px-1"
