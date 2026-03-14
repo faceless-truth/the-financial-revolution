@@ -145,6 +145,12 @@ export default function Portfolio() {
   const minsToNext = nextExec ? Math.max(0, Math.floor(((nextExec.getTime() - Date.now()) % (1000 * 60 * 60)) / (1000 * 60))) : null;
 
   const assetColor = ASSET_COLORS[portfolio.currentAsset] ?? "oklch(0.55 0.010 260)";
+  const activeMarketPrice = portfolio.currentAsset !== "CASH"
+    ? rawData[portfolio.currentAsset as keyof typeof rawData]?.slice(-1)[0]?.close ?? 0
+    : 0;
+  const currentPositionLabel = portfolio.currentAsset === "CASH"
+    ? "In cash"
+    : `Live tracking ${portfolio.currentAsset}`;
 
   // isDay1: true only if we have exactly one equity point AND it's cash (no trade applied yet)
   const isDay1 = portfolio.equityCurve.length <= 1 && portfolio.currentAsset === "CASH" && portfolio.tradeLog.length === 0;
@@ -315,7 +321,6 @@ export default function Portfolio() {
           {loading ? (
             <Skeleton className="h-64 w-full" />
           ) : isDay1 ? (
-            /* Day 1 placeholder — chart will grow from tomorrow */
             <div
               className="h-64 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed"
               style={{ borderColor: "oklch(1 0 0 / 10%)", background: "oklch(1 0 0 / 2%)" }}
@@ -329,7 +334,6 @@ export default function Portfolio() {
                   Come back after <span className="font-semibold mono-data text-foreground/60">00:05 UTC</span> to see your first data point
                 </p>
               </div>
-              {/* Single Day 1 dot preview */}
               <div className="flex items-center gap-2 px-4 py-2 rounded-lg border" style={{ background: "oklch(0.72 0.18 155 / 8%)", borderColor: "oklch(0.72 0.18 155 / 20%)" }}>
                 <span className="w-2 h-2 rounded-full" style={{ background: "oklch(0.72 0.18 155)" }} />
                 <span className="text-xs mono-data" style={{ color: "oklch(0.72 0.18 155)" }}>
@@ -415,8 +419,11 @@ export default function Portfolio() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {portfolio.currentAsset === "CASH"
-                        ? "Fully in cash — awaiting re-entry signal"
+                        ? "Fully in cash — no live coin exposure right now"
                         : `${portfolio.currentUnits.toFixed(6)} units @ ${formatPrice(portfolio.entryPrice)}`}
+                    </p>
+                    <p className="text-[11px] mt-1" style={{ color: assetColor }}>
+                      {currentPositionLabel}
                     </p>
                   </div>
                 </div>
@@ -432,20 +439,40 @@ export default function Portfolio() {
                   </div>
                 </div>
 
-                {portfolio.currentAsset !== "CASH" && (
-                  <div className="flex items-center justify-between p-3 rounded-lg border" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-0.5">Unrealised P&L</p>
-                      <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlUsd)}`}>
-                        {portfolio.unrealisedPnlUsd >= 0 ? "+" : ""}{formatLargeNumber(portfolio.unrealisedPnlUsd)}
-                      </p>
+                {portfolio.currentAsset !== "CASH" ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 rounded-lg border" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                        <p className="text-xs text-muted-foreground mb-1">Live Price</p>
+                        <p className="text-base font-bold mono-data text-white">{activeMarketPrice > 0 ? formatPrice(activeMarketPrice) : "—"}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                        <p className="text-xs text-muted-foreground mb-1">Entry vs Live</p>
+                        <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlPct)}`}>
+                          {portfolio.entryPrice > 0 && activeMarketPrice > 0 ? formatPct(((activeMarketPrice / portfolio.entryPrice) - 1) * 100) : "—"}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-muted-foreground mb-0.5">Return</p>
-                      <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlPct)}`}>
-                        {formatPct(portfolio.unrealisedPnlPct)}
-                      </p>
+                    <div className="flex items-center justify-between p-3 rounded-lg border" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-0.5">Unrealised P&L</p>
+                        <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlUsd)}`}>
+                          {portfolio.unrealisedPnlUsd >= 0 ? "+" : ""}{formatLargeNumber(portfolio.unrealisedPnlUsd)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground mb-0.5">Return</p>
+                        <p className={`text-base font-bold mono-data ${pnlClass(portfolio.unrealisedPnlPct)}`}>
+                          {formatPct(portfolio.unrealisedPnlPct)}
+                        </p>
+                      </div>
                     </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg border" style={{ background: "oklch(0.60 0.22 255 / 7%)", borderColor: "oklch(0.60 0.22 255 / 18%)" }}>
+                    <p className="text-xs text-muted-foreground mb-1">Status</p>
+                    <p className="text-sm font-semibold text-white">In cash — waiting for the next confirmed entry.</p>
+                    <p className="text-xs text-muted-foreground mt-1">No live coin price is being tracked because the current portfolio is fully in cash.</p>
                   </div>
                 )}
 
@@ -561,7 +588,6 @@ export default function Portfolio() {
                   </div>
                 </div>
 
-                {/* Next execution */}
                 <div className="flex items-center justify-between p-3 rounded-lg border border-border/30" style={{ background: "oklch(1 0 0 / 3%)" }}>
                   <div className="flex items-center gap-2">
                     <Clock size={13} className="text-primary opacity-70" />
@@ -572,7 +598,6 @@ export default function Portfolio() {
                   </span>
                 </div>
 
-                {/* Allocation breakdown */}
                 {Object.keys(signal.targetPositions).length > 0 && (
                   <div>
                     <p className="text-xs text-muted-foreground mb-2">Target Allocation at Next Execution</p>
