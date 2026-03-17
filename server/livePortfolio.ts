@@ -7,8 +7,11 @@ const STATE_FILE = process.env.CRYPTO_DASHBOARD_STATE_FILE ?? path.join(DASHBOAR
 const STRATEGY_FILE = process.env.CRYPTO_DASHBOARD_STRATEGY_FILE ?? path.join(DASHBOARD_ROOT, "optimized_strategy_data.json");
 const SIGNAL_HISTORY_FILE = process.env.CRYPTO_DASHBOARD_SIGNAL_HISTORY_FILE ?? path.join(DASHBOARD_ROOT, "optimized_signal_history.json");
 const ANALYTICS_FILE = process.env.CRYPTO_DASHBOARD_ANALYTICS_FILE ?? path.join(DASHBOARD_ROOT, "paleologo_analytics.json");
+const SCENARIO_FILE = process.env.CRYPTO_DASHBOARD_SCENARIO_FILE ?? path.join(DASHBOARD_ROOT, "next_scenarios.json");
 
 export type AssetCode = "BTC" | "ETH" | "SOL" | "SUI" | "DOGE" | "CASH";
+
+type ReadinessLevel = "NO_ACTION" | "WATCH" | "PREPARE" | "NEAR_TRIGGER";
 
 interface TradingStateFile {
   positions?: Record<string, number>;
@@ -52,6 +55,8 @@ interface StrategyDataFile {
   parameters?: Record<string, unknown>;
   btc_health?: {
     drawdown_from_30d_high?: number;
+    in_full_cash?: boolean;
+    all_negative?: boolean;
     [key: string]: unknown;
   };
   reentry_trigger?: {
@@ -142,6 +147,19 @@ interface AnalyticsFile {
   factor_loadings?: Record<string, unknown>;
 }
 
+interface ScenarioFile {
+  generated_at?: string;
+  likely_next_action?: string;
+  candidate_asset?: string | null;
+  readiness?: ReadinessLevel | string;
+  time_horizon?: string;
+  message?: string;
+  conditions?: string[];
+  blockers?: string[];
+  distances?: Record<string, number | string | boolean | null>;
+  current_state?: Record<string, unknown>;
+}
+
 export interface LivePortfolioResponse {
   source: {
     root: string;
@@ -150,6 +168,7 @@ export interface LivePortfolioResponse {
     strategyFile: string;
     signalHistoryFile: string;
     analyticsFile: string;
+    scenarioFile: string;
   };
   summary: {
     strategy: string;
@@ -202,6 +221,17 @@ export interface LivePortfolioResponse {
     fusedSignals: Array<{ asset: string; score: number }>;
     riskAdjustedScores: Array<{ asset: string; score: number }>;
   };
+  preparation: {
+    generatedAt: string | null;
+    likelyNextAction: string;
+    candidateAsset: string | null;
+    readiness: ReadinessLevel;
+    timeHorizon: string;
+    message: string;
+    conditions: string[];
+    blockers: string[];
+    distances: Array<{ label: string; value: string }>;
+  };
   tradeHistory: Array<{
     id: string;
     timestamp: string | null;
@@ -248,12 +278,160 @@ function normalizeDate(value: string | null | undefined): string | null {
   return value ? String(value).slice(0, 10) : null;
 }
 
+function formatDistanceValue(value: number | string | boolean | null | undefined): string {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  return String(value);
+}
+
+function humanizeDistanceKey(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}
+
+function normalizeReadiness(value: string | undefined): ReadinessLevel {
+  const normalized = String(value ?? "WATCH").toUpperCase();
+  if (normalized === "NO_ACTION" || normalized === "WATCH" || normalized === "PREPARE" || normalized === "NEAR_TRIGGER") {
+    return normalized;
+  }
+  return "WATCH";
+}
+
+function inferScenario(
+  strategy: StrategyDataFile,
+  currentAsset: AssetCode,
+  rankings: Array<{ asset: string; score: number }>,
+): LivePortfolioResponse["preparation"] {
+  const reentryGapPct = Number(strategy.reentry_trigger?.gap_pct ?? 0);
+  const allNegative = Boolean(strategy.btc_health?.all_negative) || Boolean(strategy.latest_signal?.all_negative);
+  const volatilityPass = strategy.latest_signal?.volatility_pass;
+  const nextCandidate = rankings.find((row) => row.asset !== currentAsset)?.asset ?? null;
+  const topScore = rankings[0]?.score ?? 0;
+  const secondScore = rankings[1]?.score ?? 0;
+  const scoreGap = round2(topScore - secondScore);
+
+  if (currentAsset === "CASH") {
+    return {
+      generatedAt: strategy.last_update ?? null,
+      likelyNextAction: "RE-ENTER RISK",
+      candidateAsset: "BTC",
+      readiness: reentryGapPct <= 2 ? "NEAR_TRIGGER" : "WATCH",
+      timeHorizon: reentryGapPct <= 2 ? "Next review" : "Monitor daily",
+      message: reentryGapPct <= 2
+        ? "BTC is approaching the re-entry threshold. Prepare exchange access in case the strategy moves out of cash at the next evaluation."
+        : "The strategy remains defensive. Monitor BTC re-entry conditions before preparing any redeployment from cold storage.",
+      conditions: [
+        "BTC re-entry threshold is met",
+        "BTC momentum remains positive",
+        "No defensive override is active",
+      ],
+      blockers: reentryGapPct > 0 ? [`BTC still needs ${reentryGapPct.toFixed(2)}% to reach the re-entry threshold.`] : [],
+      distances: [
+        { label: "Re-entry Gap", value: reentryGapPct ? `${reentryGapPct.toFixed(2)}%` : "0.00%" },
+        { label: "Momentum Positive", value: strategy.reentry_trigger?.momentum_positive ? "Yes" : "No" },
+      ],
+    };
+  }
+
+  if (allNegative) {
+    return {
+      generatedAt: strategy.last_update ?? null,
+      likelyNextAction: "MOVE TO CASH",
+      candidateAsset: "CASH",
+      readiness: "PREPARE",
+      timeHorizon: "Next review",
+      message: "Defensive conditions are elevated. Prepare to move capital to cash if the next daily evaluation confirms a broader negative regime.",
+      conditions: [
+        "All-negative condition remains active",
+        "Risk-off rules are not blocked by hold rules",
+        "Daily review confirms exit",
+      ],
+      blockers: [],
+      distances: [
+        { label: "All Negative", value: "Yes" },
+        { label: "BTC Drawdown", value: `${Number(strategy.btc_health?.drawdown_from_30d_high ?? 0).toFixed(2)}%` },
+      ],
+    };
+  }
+
+  if (nextCandidate && nextCandidate !== currentAsset) {
+    const readiness: ReadinessLevel = scoreGap <= 3 ? "PREPARE" : "WATCH";
+    return {
+      generatedAt: strategy.last_update ?? null,
+      likelyNextAction: `ROTATE TO ${nextCandidate}`,
+      candidateAsset: nextCandidate,
+      readiness,
+      timeHorizon: readiness === "PREPARE" ? "24–48 hours" : "Monitor daily",
+      message: readiness === "PREPARE"
+        ? `${nextCandidate} is the strongest alternative candidate behind ${currentAsset}. Prepare cold-storage access in case leadership changes on the next evaluation.`
+        : `${currentAsset} remains in control, but ${nextCandidate} is the most likely alternative if relative momentum shifts.`,
+      conditions: [
+        `${nextCandidate} becomes the strongest eligible momentum asset`,
+        "Volatility filter remains satisfied",
+        `${currentAsset} loses leadership or fails a rule filter`,
+      ],
+      blockers: volatilityPass === false ? ["Current volatility filter is not satisfied."] : [],
+      distances: [
+        { label: "Momentum Gap", value: `${scoreGap.toFixed(2)} pts` },
+        { label: "Volatility Pass", value: volatilityPass === undefined ? "Unknown" : volatilityPass ? "Yes" : "No" },
+      ],
+    };
+  }
+
+  return {
+    generatedAt: strategy.last_update ?? null,
+    likelyNextAction: `STAY IN ${currentAsset}`,
+    candidateAsset: currentAsset,
+    readiness: "NO_ACTION",
+    timeHorizon: "No immediate change",
+    message: `${currentAsset} remains the active allocation with no near-term rotation signal requiring cold-storage preparation.`,
+    conditions: [
+      `${currentAsset} remains the strongest eligible asset`,
+      "Volatility and regime filters remain satisfied",
+      "No cash exit rule is triggered",
+    ],
+    blockers: [],
+    distances: [],
+  };
+}
+
+function normalizeScenario(
+  scenario: ScenarioFile,
+  fallback: LivePortfolioResponse["preparation"],
+): LivePortfolioResponse["preparation"] {
+  const distanceEntries = Object.entries(scenario.distances ?? {}).map(([key, value]) => ({
+    label: humanizeDistanceKey(key),
+    value: formatDistanceValue(value),
+  }));
+
+  return {
+    generatedAt: scenario.generated_at ?? fallback.generatedAt,
+    likelyNextAction: String(scenario.likely_next_action ?? fallback.likelyNextAction),
+    candidateAsset: scenario.candidate_asset ? String(scenario.candidate_asset) : fallback.candidateAsset,
+    readiness: normalizeReadiness(typeof scenario.readiness === "string" ? scenario.readiness : undefined),
+    timeHorizon: String(scenario.time_horizon ?? fallback.timeHorizon),
+    message: String(scenario.message ?? fallback.message),
+    conditions: Array.isArray(scenario.conditions) && scenario.conditions.length > 0 ? scenario.conditions.map(String) : fallback.conditions,
+    blockers: Array.isArray(scenario.blockers) ? scenario.blockers.map(String) : fallback.blockers,
+    distances: distanceEntries.length > 0 ? distanceEntries : fallback.distances,
+  };
+}
+
 export async function getLivePortfolioData(): Promise<LivePortfolioResponse> {
-  const [state, strategy, signalHistory, analytics] = await Promise.all([
+  const [state, strategy, signalHistory, analytics, scenarioFile] = await Promise.all([
     readJsonFile<TradingStateFile>(STATE_FILE, {}),
     readJsonFile<StrategyDataFile>(STRATEGY_FILE, {}),
     readJsonFile<SignalHistoryRow[]>(SIGNAL_HISTORY_FILE, []),
     readJsonFile<AnalyticsFile>(ANALYTICS_FILE, {}),
+    readJsonFile<ScenarioFile>(SCENARIO_FILE, {}),
   ]);
 
   const currentAsset = toAssetCode(strategy.current_position ?? state.asset ?? null);
@@ -273,6 +451,9 @@ export async function getLivePortfolioData(): Promise<LivePortfolioResponse> {
     : 0;
   const totalReturnPct = Number(strategy.performance?.total_return ?? 0);
   const pnlUsd = round2(displayedPortfolioValueUsd - FIXED_CAPITAL_USD);
+  const momentumScores = sortScoreMap(strategy.latest_signal?.momentum_scores ?? analytics.momentum_scores);
+  const inferredScenario = inferScenario(strategy, currentAsset, momentumScores);
+  const preparation = normalizeScenario(scenarioFile, inferredScenario);
 
   return {
     source: {
@@ -282,6 +463,7 @@ export async function getLivePortfolioData(): Promise<LivePortfolioResponse> {
       strategyFile: STRATEGY_FILE,
       signalHistoryFile: SIGNAL_HISTORY_FILE,
       analyticsFile: ANALYTICS_FILE,
+      scenarioFile: SCENARIO_FILE,
     },
     summary: {
       strategy: String(strategy.strategy ?? "TREND_CONFIRM"),
@@ -330,10 +512,11 @@ export async function getLivePortfolioData(): Promise<LivePortfolioResponse> {
       rule4Blocks: Number(strategy.performance?.rule4_blocks ?? state.rule4_blocks ?? 0),
     },
     rankings: {
-      momentumScores: sortScoreMap(strategy.latest_signal?.momentum_scores ?? analytics.momentum_scores),
+      momentumScores,
       fusedSignals: sortScoreMap(strategy.paleologo_analytics?.fused_signals ?? analytics.fused_signals),
       riskAdjustedScores: sortScoreMap(strategy.paleologo_analytics?.risk_adjusted_scores ?? analytics.risk_adjusted_scores),
     },
+    preparation,
     tradeHistory: [...signalHistory]
       .reverse()
       .map((row, index) => ({

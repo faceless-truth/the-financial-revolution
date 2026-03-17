@@ -7,11 +7,13 @@ import {
   DollarSign,
   Clock,
   ArrowUpRight,
-  Minus,
   BarChart2,
   Zap,
   Shield,
   Activity,
+  BellRing,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 
 const ASSET_COLORS: Record<string, string> = {
@@ -36,6 +38,41 @@ function pnlClass(v: number) {
   if (v > 0) return "text-emerald-400";
   if (v < 0) return "text-red-400";
   return "text-muted-foreground";
+}
+
+function readinessMeta(readiness: string) {
+  switch (readiness) {
+    case "NO_ACTION":
+      return {
+        label: "No Action",
+        color: "oklch(0.58 0.03 260)",
+        icon: <CheckCircle2 size={14} />,
+      };
+    case "WATCH":
+      return {
+        label: "Watch",
+        color: "oklch(0.78 0.18 75)",
+        icon: <BellRing size={14} />,
+      };
+    case "PREPARE":
+      return {
+        label: "Prepare",
+        color: "oklch(0.72 0.18 155)",
+        icon: <AlertTriangle size={14} />,
+      };
+    case "NEAR_TRIGGER":
+      return {
+        label: "Near Trigger",
+        color: "oklch(0.62 0.22 25)",
+        icon: <Zap size={14} />,
+      };
+    default:
+      return {
+        label: readiness,
+        color: "oklch(0.60 0.22 255)",
+        icon: <BellRing size={14} />,
+      };
+  }
 }
 
 function StatCard({
@@ -107,9 +144,13 @@ export default function Portfolio() {
   const loading = snapshotQuery.isLoading;
   const summary = data?.summary;
   const performance = data?.performance;
+  const preparation = data?.preparation;
   const history = data?.tradeHistory ?? [];
   const currentAsset = summary?.currentAsset ?? "CASH";
   const assetColor = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
+  const prepColor = readinessMeta(preparation?.readiness ?? "WATCH").color;
+  const prepLabel = readinessMeta(preparation?.readiness ?? "WATCH").label;
+  const prepIcon = readinessMeta(preparation?.readiness ?? "WATCH").icon;
 
   return (
     <div className="min-h-screen" style={{ background: "oklch(0.10 0.010 260)" }}>
@@ -175,7 +216,7 @@ export default function Portfolio() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
           </div>
-        ) : !data || !summary || !performance ? (
+        ) : !data || !summary || !performance || !preparation ? (
           <div className="panel p-6">
             <p className="text-sm text-red-300 font-semibold">Unable to load live portfolio snapshot.</p>
             <p className="text-xs text-muted-foreground mt-2">
@@ -213,6 +254,110 @@ export default function Portfolio() {
                 color="oklch(0.60 0.22 255)"
                 icon={<Shield size={14} />}
               />
+            </div>
+
+            <div className="panel p-5" style={{ borderColor: `${prepColor}25`, background: `${prepColor}06` }}>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-5">
+                <div>
+                  <div className="flex items-center gap-2 mb-2" style={{ color: prepColor }}>
+                    {prepIcon}
+                    <h2 className="text-xs font-semibold tracking-widest uppercase" style={{ fontFamily: "Geist, sans-serif" }}>
+                      Preparation Panel
+                    </h2>
+                  </div>
+                  <p className="text-2xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+                    {preparation.likelyNextAction}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-2 max-w-3xl">
+                    {preparation.message}
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-start lg:items-end gap-2">
+                  <span className="px-3 py-1 rounded-lg text-sm font-bold" style={{ background: `${prepColor}18`, color: prepColor, fontFamily: "Syne, sans-serif" }}>
+                    {prepLabel}
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Horizon: {preparation.timeHorizon}
+                  </p>
+                  {preparation.generatedAt && (
+                    <p className="text-xs text-muted-foreground/60">
+                      Updated {timeAgo(new Date(preparation.generatedAt))}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+                <div className="rounded-xl border p-4" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                  <p className="text-xs text-muted-foreground mb-1">Likely Candidate</p>
+                  <p className="text-lg font-bold" style={{ color: ASSET_COLORS[preparation.candidateAsset ?? "CASH"] ?? prepColor, fontFamily: "Syne, sans-serif" }}>
+                    {preparation.candidateAsset ?? "No change"}
+                  </p>
+                </div>
+                <div className="rounded-xl border p-4" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                  <p className="text-xs text-muted-foreground mb-1">Current Position</p>
+                  <p className="text-lg font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+                    {currentAsset}
+                  </p>
+                </div>
+                <div className="rounded-xl border p-4" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                  <p className="text-xs text-muted-foreground mb-1">Operational Cue</p>
+                  <p className="text-lg font-bold" style={{ color: prepColor, fontFamily: "Syne, sans-serif" }}>
+                    {prepLabel}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-xl border p-4" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                  <h3 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3" style={{ fontFamily: "Geist, sans-serif" }}>
+                    Trigger Conditions
+                  </h3>
+                  <div className="space-y-2">
+                    {preparation.conditions.map((condition) => (
+                      <div key={condition} className="flex items-start gap-2 text-sm text-foreground/80">
+                        <span style={{ color: prepColor }}>•</span>
+                        <span>{condition}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border p-4" style={{ background: "oklch(1 0 0 / 3%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                  <h3 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3" style={{ fontFamily: "Geist, sans-serif" }}>
+                    Distance To Trigger
+                  </h3>
+                  <div className="space-y-2">
+                    {preparation.distances.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No near-term trigger distance is currently required.</p>
+                    ) : (
+                      preparation.distances.map((row) => (
+                        <div key={row.label} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "oklch(1 0 0 / 8%)", background: "oklch(1 0 0 / 2%)" }}>
+                          <span className="text-muted-foreground">{row.label}</span>
+                          <span className="mono-data font-bold text-white">{row.value}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {preparation.blockers.length > 0 && (
+                    <div className="mt-4">
+                      <h4 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-2" style={{ fontFamily: "Geist, sans-serif" }}>
+                        Current Blockers
+                      </h4>
+                      <div className="space-y-2">
+                        {preparation.blockers.map((blocker) => (
+                          <div key={blocker} className="flex items-start gap-2 text-sm text-amber-200/90">
+                            <span>•</span>
+                            <span>{blocker}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
