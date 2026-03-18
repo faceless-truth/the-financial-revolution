@@ -206,6 +206,7 @@ export async function getLivePortfolioData() {
     : Array.isArray(strategy?.momentumRanked)
       ? strategy.momentumRanked
       : [];
+  const planning = computePlanningState(state, strategy, history, scenarios, topCandidates);
 
   return {
     source: {
