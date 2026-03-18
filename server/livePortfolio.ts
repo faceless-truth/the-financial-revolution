@@ -26,6 +26,28 @@ function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function toDate(value: any) {
+  if (!value) return null;
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function formatDateUtc(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function humanDateUtc(date: Date) {
+  return date.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function getLatestHistoryRow(history: any[]) {
+  return Array.isArray(history) && history.length ? history[history.length - 1] : null;
+}
+
 function inferDisplayedPortfolioValueUsd(state: any, analytics: any, strategy: any): number {
   return toNumber(
     state?.displayedPortfolioValueUsd ??
@@ -50,7 +72,7 @@ function inferFixedCapitalUsd(state: any, analytics: any, strategy: any): number
 }
 
 function inferLastUpdate(state: any, history: any[]): string {
-  const lastHistory = history.length ? history[history.length - 1] : null;
+  const lastHistory = getLatestHistoryRow(history);
   return asString(
     state?.last_update ??
     state?.lastUpdate ??
@@ -61,28 +83,90 @@ function inferLastUpdate(state: any, history: any[]): string {
   );
 }
 
-function toDate(value: any) {
-  if (!value) return null;
-  const d = new Date(String(value));
-  return Number.isNaN(d.getTime()) ? null : d;
+function inferSignalAction(state: any, strategy: any, history: any[]): string {
+  const lastHistory = getLatestHistoryRow(history);
+  return asString(
+    state?.signal_action ??
+    state?.signalAction ??
+    strategy?.signalAction ??
+    strategy?.action ??
+    lastHistory?.action ??
+    "HOLD",
+    "HOLD",
+  );
 }
-function addDays(date: Date, days: number) {
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+
+function inferRuleReason(state: any, strategy: any, history: any[]): string {
+  const lastHistory = getLatestHistoryRow(history);
+  return asString(
+    state?.reason ??
+    state?.rule_reason ??
+    strategy?.reason ??
+    lastHistory?.reason ??
+    lastHistory?.ruleReason ??
+    "Live droplet mirror",
+    "Live droplet mirror",
+  );
 }
-function formatDateUtc(date: Date) {
-  return date.toISOString().slice(0, 10);
+
+function inferCurrentAsset(state: any, history: any[]): string {
+  const direct = asString(state?.current_asset ?? state?.currentAsset ?? state?.current_position ?? "", "");
+  if (direct) return direct;
+
+  const lastHistory = getLatestHistoryRow(history);
+  const positions = lastHistory?.target_positions ?? lastHistory?.current_positions ?? {};
+  if (positions && typeof positions === "object") {
+    const firstKey = Object.keys(positions).find((key) => toNumber((positions as any)[key], 0) > 0);
+    if (firstKey) return firstKey;
+  }
+  if (lastHistory?.in_cash === true) return "CASH";
+  return "CASH";
 }
-function humanDateUtc(date: Date) {
-  return date.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+function inferTopCandidates(strategy: any, history: any[]): Array<{ asset: string; score: number }> {
+  const direct = Array.isArray(strategy?.topCandidates)
+    ? strategy.topCandidates
+    : Array.isArray(strategy?.momentumRanked)
+      ? strategy.momentumRanked
+      : [];
+
+  const normalizedDirect = direct
+    .map((row: any) => ({
+      asset: asString(row?.asset ?? row?.symbol ?? "", ""),
+      score: toNumber(row?.score ?? row?.momentum ?? row?.value ?? 0, 0),
+    }))
+    .filter((row: any) => row.asset);
+
+  if (normalizedDirect.length > 0) {
+    return normalizedDirect.sort((a, b) => b.score - a.score);
+  }
+
+  for (const row of [...history].reverse()) {
+    const scores = row?.momentum_scores;
+    if (scores && typeof scores === "object") {
+      const ranked = Object.entries(scores)
+        .map(([asset, score]) => ({ asset, score: toNumber(score, 0) }))
+        .sort((a, b) => b.score - a.score);
+      if (ranked.length > 0) return ranked;
+    }
+  }
+
+  return [];
 }
-function inferCandidateAsset(strategy: any, topCandidates: any[]) {
+
+function inferCandidateAsset(strategy: any, topCandidates: any[], history: any[]) {
   const direct = asString(strategy?.topAsset ?? strategy?.targetAsset ?? strategy?.candidateAsset ?? "", "");
   if (direct) return direct;
+
+  const historyTop = [...history].reverse().map((row) => asString(row?.top_asset ?? row?.topAsset ?? "", "")).find(Boolean);
+  if (historyTop) return historyTop;
+
   if (Array.isArray(topCandidates) && topCandidates.length) {
     return asString(topCandidates[0]?.asset ?? topCandidates[0]?.symbol ?? "", "");
   }
   return "";
 }
+
 function inferLatestThirtyDayHighDate(state: any, strategy: any, history: any[]) {
   const candidates = [
     state?.latest_30d_high_date,
@@ -111,7 +195,8 @@ function inferLatestThirtyDayHighDate(state: any, strategy: any, history: any[])
   }
   return null;
 }
-function inferRule4Readiness(strategy: any, scenarios: any) {
+
+function inferRule4Readiness(strategy: any, scenarios: any, history: any[]) {
   const values = [
     strategy?.rule4Pass,
     strategy?.rule4Passed,
@@ -126,6 +211,12 @@ function inferRule4Readiness(strategy: any, scenarios: any) {
   for (const value of values) {
     if (typeof value === "boolean") return value;
   }
+
+  const latestHistory = getLatestHistoryRow(history);
+  const latestReason = asString(latestHistory?.reason ?? latestHistory?.ruleReason ?? "", "");
+  if (/rule\s*4/i.test(latestReason) && /need|pending|block|fail|failed/i.test(latestReason)) return false;
+  if (/rule\s*4/i.test(latestReason) && /pass|passed|ready/i.test(latestReason)) return true;
+
   const textCandidates = [
     asString(strategy?.preparation?.note ?? "", ""),
     asString(strategy?.reason ?? "", ""),
@@ -135,22 +226,28 @@ function inferRule4Readiness(strategy: any, scenarios: any) {
   if (/rule\s*4/i.test(textCandidates) && /fail|failed|block/i.test(textCandidates)) return false;
   return null;
 }
+
 function computePlanningState(state: any, strategy: any, history: any[], scenarios: any, topCandidates: any[]) {
-  const currentAsset = asString(state?.current_asset ?? state?.currentAsset ?? state?.current_position ?? "CASH", "CASH");
+  const currentAsset = inferCurrentAsset(state, history);
   const holdDays = toNumber(state?.hold_days ?? state?.holdDays ?? 0, 0);
-  const candidateAsset = inferCandidateAsset(strategy, topCandidates);
+  const candidateAsset = inferCandidateAsset(strategy, topCandidates, history);
   const latestHighDate = inferLatestThirtyDayHighDate(state, strategy, history);
   const latestHighDateIso = latestHighDate ? formatDateUtc(latestHighDate) : "";
-  const currentRuleReason = asString(state?.reason ?? state?.rule_reason ?? strategy?.reason ?? "", "");
-  const rule3Active = /rule\s*3|30d\s+high|new\s+30d\s+high/i.test(currentRuleReason);
-  const rule2Active = /rule\s*2|minimum\s+hold|hold\s*days|7-day\s+minimum/i.test(currentRuleReason);
-  const rule4Ready = inferRule4Readiness(strategy, scenarios);
-  const earliestEligibleRunUtc = latestHighDate ? addDays(latestHighDate, 4) : null;
-  const blockExpiresAfterCloseUtc = latestHighDate ? addDays(latestHighDate, 3) : null;
+  const currentRuleReason = inferRuleReason(state, strategy, history);
+  const latestHistory = getLatestHistoryRow(history);
+  const latestHistoryReason = asString(latestHistory?.reason ?? latestHistory?.ruleReason ?? "", "");
+  const effectiveReason = `${currentRuleReason} ${latestHistoryReason}`.trim();
+  const rule3Active = /rule\s*3|30d\s+high|new\s+30d\s+high/i.test(effectiveReason);
+  const rule2Active = /rule\s*2|minimum\s+hold|held\s+\d+\/7|7-day\s+minimum/i.test(effectiveReason);
+  const rule4Ready = inferRule4Readiness(strategy, scenarios, history);
+  const blockExpiresAfterCloseUtc = latestHighDate ? addDays(latestHighDate, 2) : null;
+  const earliestEligibleRunUtc = latestHighDate ? addDays(latestHighDate, 3) : null;
+
   let currentBlocker = "Monitoring for next eligible rotation window";
   if (rule2Active) currentBlocker = "Rule 2: 7-day minimum hold still active";
-  else if (rule3Active) currentBlocker = "Rule 3: BTC new 30d high still inside 3-candle window";
+  else if (rule3Active) currentBlocker = "Rule 3: BTC rally block active until the post-close window clears";
   else if (rule4Ready === false) currentBlocker = "Rule 4: target asset breakout confirmation not yet satisfied";
+
   let nextActionSummary = currentBlocker;
   if (rule3Active && earliestEligibleRunUtc && candidateAsset) {
     nextActionSummary = `Earliest possible rotation into ${candidateAsset} is ${humanDateUtc(earliestEligibleRunUtc)} UTC, provided BTC does not print another 30d high before then and Rule 4 passes.`;
@@ -161,6 +258,7 @@ function computePlanningState(state: any, strategy: any, history: any[], scenari
   } else if (candidateAsset) {
     nextActionSummary = `${candidateAsset} is currently the leading candidate if all rotation gates remain clear.`;
   }
+
   return {
     currentBlocker,
     rule2Active,
@@ -191,21 +289,17 @@ export async function getLivePortfolioData() {
   const pnlUsd = displayedPortfolioValueUsd - fixedCapitalUsd;
   const totalReturnPct = fixedCapitalUsd > 0 ? (pnlUsd / fixedCapitalUsd) * 100 : 0;
   const lastUpdate = inferLastUpdate(state, history);
-  const currentAsset = asString(state?.current_asset ?? state?.currentPosition ?? state?.current_position ?? "CASH", "CASH");
-  const signalAction = asString(state?.signal_action ?? state?.signalAction ?? strategy?.signalAction ?? strategy?.action ?? "HOLD", "HOLD");
+  const currentAsset = inferCurrentAsset(state, history);
+  const signalAction = inferSignalAction(state, strategy, history);
   const marketRegime = asString(strategy?.marketRegime ?? strategy?.market_regime ?? analytics?.marketRegime ?? "LIVE", "LIVE");
-  const ruleReason = asString(state?.reason ?? state?.rule_reason ?? strategy?.reason ?? "Live droplet mirror", "Live droplet mirror");
+  const ruleReason = inferRuleReason(state, strategy, history);
   const regimeConfidence = asString(strategy?.regimeConfidence ?? strategy?.confidence ?? analytics?.confidenceLabel ?? "—", "—");
   const confidenceLabel = asString(strategy?.confidenceLabel ?? analytics?.confidenceLabel ?? "Live", "Live");
   const liveStrategyValueUsd = toNumber(state?.liveStrategyValueUsd ?? state?.live_strategy_value_usd ?? analytics?.liveStrategyValueUsd ?? displayedPortfolioValueUsd, displayedPortfolioValueUsd);
   const holdDays = toNumber(state?.hold_days ?? state?.holdDays ?? 0, 0);
   const entryPrice = toNumber(state?.entry_price ?? state?.entryPrice ?? 0, 0);
   const entryDate = asString(state?.entry_date ?? state?.entryDate ?? "", "");
-  const topCandidates = Array.isArray(strategy?.topCandidates)
-    ? strategy.topCandidates
-    : Array.isArray(strategy?.momentumRanked)
-      ? strategy.momentumRanked
-      : [];
+  const topCandidates = inferTopCandidates(strategy, history);
   const planning = computePlanningState(state, strategy, history, scenarios, topCandidates);
 
   return {
@@ -247,7 +341,7 @@ export async function getLivePortfolioData() {
       readiness: asString(strategy?.readiness ?? strategy?.preparation?.readiness ?? "WATCH", "WATCH"),
       label: asString(strategy?.preparation?.label ?? strategy?.readiness ?? "Watch", "Watch"),
       note: asString(strategy?.preparation?.note ?? strategy?.reason ?? ruleReason, ruleReason),
-      targetAsset: asString(strategy?.topAsset ?? strategy?.targetAsset ?? "", ""),
+      targetAsset: inferCandidateAsset(strategy, topCandidates, history),
       topCandidates,
       scenario: scenarios ?? {},
     },
