@@ -74,14 +74,16 @@ function inferFixedCapitalUsd(state: any, analytics: any, strategy: any): number
 
 function inferLastUpdate(state: any, history: any[]): string {
   const lastHistory = getLatestHistoryRow(history);
-  return asString(
-    state?.last_update ??
-    state?.lastUpdate ??
-    lastHistory?.timestamp ??
-    lastHistory?.date ??
-    new Date().toISOString(),
-    new Date().toISOString(),
-  );
+  const stateDate = toDate(state?.last_update ?? state?.lastUpdate ?? null);
+  const historyDate = toDate(lastHistory?.timestamp ?? lastHistory?.date ?? null);
+
+  if (stateDate && historyDate) {
+    return stateDate >= historyDate ? stateDate.toISOString() : historyDate.toISOString();
+  }
+  if (historyDate) return historyDate.toISOString();
+  if (stateDate) return stateDate.toISOString();
+
+  return new Date().toISOString();
 }
 
 function inferSignalAction(state: any, strategy: any, history: any[]): string {
