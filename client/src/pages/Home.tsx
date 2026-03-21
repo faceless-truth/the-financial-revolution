@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { formatLargeNumber, timeAgo } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, Clock, Activity, Shield, BellRing, ArrowUpRight, Radar, CalendarDays, Target, AlertTriangle } from "lucide-react";
+import { TrendingUp, Clock, Activity, Shield, BellRing, ArrowUpRight, Radar, CalendarDays, Target, AlertTriangle, Database, RefreshCw } from "lucide-react";
 
 const ASSET_COLORS: Record<string, string> = {
   BTC: "oklch(0.78 0.18 75)",
@@ -19,40 +19,111 @@ const ASSET_ICONS: Record<string, string> = {
 
 type RankingRow = { asset?: string; symbol?: string; score?: number };
 
+type LiveStrategyStatus = {
+  currentPosition?: string;
+  signalAction?: string;
+  holdDays?: number;
+  entryPrice?: number;
+  entryDate?: string;
+  lastUpdate?: string;
+  ruleReason?: string;
+  displayedPortfolioValueUsd?: number;
+  fixedCapitalUsd?: number;
+};
+
 type LiveDashboardSnapshot = {
-  status?: {
-    currentPosition?: string;
-    signalAction?: string;
-    holdDays?: number;
-    entryPrice?: number;
-    entryDate?: string;
-    lastUpdate?: string;
-    ruleReason?: string;
-    displayedPortfolioValueUsd?: number;
-    fixedCapitalUsd?: number;
+  liveStrategy?: {
+    status?: LiveStrategyStatus;
+    ranking?: RankingRow[];
+    preparation?: {
+      readiness?: string;
+      note?: string;
+      targetAsset?: string;
+    };
+    planning?: {
+      currentBlocker?: string;
+      candidateAsset?: string;
+      earliestEligibleRunLabel?: string;
+      earliestEligibleRunUtc?: string;
+      latestThirtyDayHighDateUtc?: string;
+      blockExpiresAfterCloseUtc?: string;
+      rule2Active?: boolean;
+      rule3Active?: boolean;
+      rule4Ready?: boolean | null;
+      nextActionSummary?: string;
+      holdDays?: number;
+      currentAsset?: string;
+    };
+    performance?: {
+      counters?: {
+        trades?: number;
+        rotations?: number;
+        cashExits?: number;
+        allNegativeExits?: number;
+        allNegativeBlocked?: number;
+        rule2Blocks?: number;
+        rule3Blocks?: number;
+        rule3ForceBtc?: number;
+        rule4Blocks?: number;
+      };
+    };
+    tradeHistory?: Array<Record<string, unknown>>;
   };
-  ranking?: RankingRow[];
-  preparation?: {
-    readiness?: string;
-    note?: string;
-    targetAsset?: string;
+  forecast?: {
+    generatedAtUtc?: string;
+    sourceMode?: string;
+    currentPosition?: {
+      asset?: string;
+      allocation?: number;
+      holdDays?: number;
+      entryPrice?: number;
+      entryDate?: string;
+      portfolioValueUsd?: number;
+    };
+    momentumRanking?: RankingRow[];
+    btcHealth?: {
+      latestThirtyDayHighDateUtc?: string;
+      blockExpiresAfterCloseUtc?: string;
+      rule3Active?: boolean;
+    };
+    confidence?: {
+      score?: number;
+      label?: string;
+      fearGreedValue?: number;
+      fearGreedAverage?: number;
+    };
+    rules?: {
+      rule2Active?: boolean;
+      rule3Active?: boolean;
+      rule4Ready?: boolean | null;
+      currentBlocker?: string;
+    };
+    nextTrade?: {
+      actionIfRunNow?: string;
+      targetAsset?: string;
+      reason?: string;
+      conditionsNeeded?: string[];
+    };
+    forwardOutlook?: Array<{
+      day?: number;
+      dateUtc?: string;
+      label?: string;
+      notes?: string[];
+    }>;
   };
-  planning?: {
-    currentBlocker?: string;
-    candidateAsset?: string;
-    earliestEligibleRunLabel?: string;
-    earliestEligibleRunUtc?: string;
-    latestThirtyDayHighDateUtc?: string;
-    blockExpiresAfterCloseUtc?: string;
-    rule2Active?: boolean;
-    rule3Active?: boolean;
-    rule4Ready?: boolean | null;
-    nextActionSummary?: string;
-    holdDays?: number;
-    currentAsset?: string;
-  };
-  tradeHistory?: Array<Record<string, unknown>>;
   source?: { root?: string };
+  refresh?: {
+    pollingMs?: number;
+    dailyCloseUtc?: string;
+    lastSuccessfulUpdateUtc?: string;
+  };
+  legacy?: {
+    status?: LiveStrategyStatus;
+    ranking?: RankingRow[];
+    planning?: LiveDashboardSnapshot["liveStrategy"]["planning"];
+    preparation?: LiveDashboardSnapshot["liveStrategy"]["preparation"];
+    tradeHistory?: Array<Record<string, unknown>>;
+  };
 };
 
 function StatCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
@@ -78,6 +149,10 @@ function toneColor(kind: "good" | "warn" | "neutral") {
   if (kind === "good") return "oklch(0.72 0.18 155)";
   if (kind === "warn") return "oklch(0.78 0.18 75)";
   return "oklch(0.72 0.02 260)";
+}
+
+function counterValue(value: unknown) {
+  return Number.isFinite(Number(value)) ? String(value) : "0";
 }
 
 export default function Home() {
@@ -107,41 +182,27 @@ export default function Home() {
     };
   }, []);
 
-  const status = data?.status;
-  const ranking = useMemo(() => Array.isArray(data?.ranking) ? data.ranking ?? [] : [], [data]);
-  const history = useMemo(() => Array.isArray(data?.tradeHistory) ? data.tradeHistory ?? [] : [], [data]);
-  const planning = data?.planning ?? {};
-  const currentAsset = status?.currentPosition ?? 'CASH';
+  const liveStrategy = data?.liveStrategy;
+  const legacy = data?.legacy;
+  const status = liveStrategy?.status ?? legacy?.status;
+  const planning = liveStrategy?.planning ?? legacy?.planning ?? {};
+  const ranking = useMemo(() => {
+    const primary = Array.isArray(liveStrategy?.ranking) ? liveStrategy?.ranking : [];
+    const fallback = Array.isArray(legacy?.ranking) ? legacy?.ranking : [];
+    return primary.length > 0 ? primary : fallback;
+  }, [liveStrategy, legacy]);
+  const history = useMemo(() => {
+    const primary = Array.isArray(liveStrategy?.tradeHistory) ? liveStrategy?.tradeHistory : [];
+    const fallback = Array.isArray(legacy?.tradeHistory) ? legacy?.tradeHistory : [];
+    return primary.length > 0 ? primary : fallback;
+  }, [liveStrategy, legacy]);
+  const forecast = data?.forecast;
+  const forecastRanking = Array.isArray(forecast?.momentumRanking) && forecast?.momentumRanking.length > 0 ? forecast?.momentumRanking : ranking;
+  const currentAsset = status?.currentPosition ?? forecast?.currentPosition?.asset ?? 'CASH';
   const assetColor = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
-  const topCandidate = planning.candidateAsset ?? data?.preparation?.targetAsset ?? ranking[0]?.asset ?? ranking[0]?.symbol ?? 'Watching leaders';
-  const forecastAction = status?.signalAction === 'HOLD' && planning.currentBlocker ? `HOLD · ${planning.currentBlocker}` : status?.signalAction ?? 'HOLD';
-  const blockers = [
-    planning.rule2Active ? 'Rule 2 minimum hold is still active.' : null,
-    planning.rule3Active ? 'Rule 3 BTC rally block is suppressing alt rotation.' : null,
-    planning.rule4Ready === false ? `Rule 4 breakout confirmation is still pending for ${topCandidate}.` : null,
-  ].filter(Boolean) as string[];
-  const conditionsNeeded = [
-    planning.rule2Active ? `Continue holding ${currentAsset} until the 7-day minimum hold clears.` : null,
-    planning.rule3Active ? `Wait until after ${planning.earliestEligibleRunLabel ?? 'the next eligible close'} provided BTC does not print another 30-day high.` : null,
-    planning.rule4Ready === false ? `${topCandidate} must confirm breakout near its 30-day high before rotation.` : null,
-  ].filter(Boolean) as string[];
-  const forwardOutlook = useMemo(() => {
-    const baseDate = planning.earliestEligibleRunUtc ? new Date(planning.earliestEligibleRunUtc) : null;
-    return Array.from({ length: 4 }).map((_, index) => {
-      const day = index + 1;
-      const date = baseDate ? new Date(baseDate.getTime() + index * 24 * 60 * 60 * 1000) : null;
-      let note = 'No major rule-state change detected yet.';
-      if (planning.rule2Active && day === 1) note = 'Minimum-hold window is the nearest blocker to clear.';
-      else if (planning.rule3Active && day === 1) note = `Rule 3 may clear first around ${planning.earliestEligibleRunLabel ?? 'the next eligible window'}.`;
-      else if (!planning.rule2Active && !planning.rule3Active && planning.rule4Ready !== false) note = `${topCandidate} remains eligible if momentum leadership holds.`;
-      else if (planning.rule4Ready === false) note = `${topCandidate} still needs breakout confirmation even if earlier blockers clear.`;
-      return {
-        day,
-        dateLabel: date ? date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : `+${day}d`,
-        note,
-      };
-    });
-  }, [planning, topCandidate]);
+  const liveTarget = planning.candidateAsset ?? liveStrategy?.preparation?.targetAsset ?? legacy?.preparation?.targetAsset ?? ranking[0]?.asset ?? ranking[0]?.symbol ?? 'Watching leaders';
+  const forecastTarget = forecast?.nextTrade?.targetAsset ?? forecastRanking[0]?.asset ?? forecastRanking[0]?.symbol ?? liveTarget;
+  const refreshMinutes = Math.round((data?.refresh?.pollingMs ?? 5 * 60 * 1000) / 60000);
 
   return (
     <div className="min-h-screen" style={{ background: 'oklch(0.10 0.010 260)' }}>
@@ -153,7 +214,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: 'Syne, sans-serif' }}>The Financial Revolution</h1>
-              <p className="text-xs text-muted-foreground">Strategy Dashboard</p>
+              <p className="text-xs text-muted-foreground">Dual-Engine Strategy Dashboard</p>
             </div>
           </div>
           <Link href="/portfolio">
@@ -176,102 +237,103 @@ export default function Home() {
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Current Position" value={status.currentPosition ?? 'CASH'} sub={status.entryDate ? `Entered ${status.entryDate}` : 'Awaiting position'} color={assetColor} />
-              <StatCard label="Signal Action" value={status.signalAction ?? 'HOLD'} sub={status.ruleReason ?? 'Live droplet mirror'} color="oklch(0.72 0.18 155)" />
+              <StatCard label="Executed Signal" value={status.signalAction ?? 'HOLD'} sub={status.ruleReason ?? 'Live droplet mirror'} color="oklch(0.72 0.18 155)" />
               <StatCard label="Displayed Value" value={formatLargeNumber(status.displayedPortfolioValueUsd ?? 0)} sub={`Fixed capital ${formatLargeNumber(status.fixedCapitalUsd ?? 71_000)}`} color="oklch(0.60 0.22 255)" />
-              <StatCard label="Hold Days" value={String(status.holdDays ?? 0)} sub={status.lastUpdate ? `Updated ${timeAgo(new Date(status.lastUpdate))}` : 'No timestamp'} color="oklch(0.78 0.18 75)" />
+              <StatCard label="Hold Days" value={String(status.holdDays ?? forecast?.currentPosition?.holdDays ?? 0)} sub={status.lastUpdate ? `Updated ${timeAgo(new Date(status.lastUpdate))}` : 'No timestamp'} color="oklch(0.78 0.18 75)" />
             </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
               <div className="panel p-5 lg:col-span-2">
-                <SectionTitle icon={<Activity size={14} className="text-primary opacity-70" />}>Live Strategy Status</SectionTitle>
+                <SectionTitle icon={<Database size={14} className="text-primary opacity-70" />}>Live Strategy Engine</SectionTitle>
                 <div className="space-y-3 text-sm text-muted-foreground">
-                  <p><span className="text-foreground font-semibold">Rule reason:</span> {status.ruleReason ?? '—'}</p>
-                  <p><span className="text-foreground font-semibold">Preparation:</span> {data.preparation?.readiness ?? 'WATCH'}{data.preparation?.targetAsset ? ` · target ${data.preparation.targetAsset}` : ''}</p>
+                  <p><span className="text-foreground font-semibold">Executed rule reason:</span> {status.ruleReason ?? '—'}</p>
+                  <p><span className="text-foreground font-semibold">Current blocker:</span> {planning.currentBlocker ?? 'Monitoring live conditions'}</p>
+                  <p><span className="text-foreground font-semibold">Current candidate:</span> {liveTarget}</p>
                   <p><span className="text-foreground font-semibold">Source:</span> <span className="mono-data break-all">{data.source?.root ?? '/var/lib/crypto_dashboard'}</span></p>
                 </div>
               </div>
               <div className="panel p-5">
-                <SectionTitle icon={<Shield size={14} className="text-primary opacity-70" />}>Rotation Readiness</SectionTitle>
+                <SectionTitle icon={<RefreshCw size={14} className="text-primary opacity-70" />}>Daily Refresh</SectionTitle>
                 <div className="space-y-3 text-sm text-muted-foreground">
-                  <p><span className="text-foreground font-semibold">Current blocker:</span> {planning.currentBlocker ?? 'Monitoring live conditions'}</p>
-                  <p><span className="text-foreground font-semibold">Candidate:</span> {topCandidate}</p>
-                  <p><span className="text-foreground font-semibold">Earliest eligible run:</span> {planning.earliestEligibleRunLabel ?? 'Watching next close'}</p>
-                  <p><span className="text-foreground font-semibold">Rule 4:</span> {planning.rule4Ready === true ? 'Ready' : planning.rule4Ready === false ? 'Pending confirmation' : 'Monitoring'}</p>
-                  <p>{planning.nextActionSummary ?? 'The dashboard reflects the live droplet script state, including current blockers and earliest eligible rotation timing.'}</p>
+                  <p><span className="text-foreground font-semibold">Polling interval:</span> every {refreshMinutes} min</p>
+                  <p><span className="text-foreground font-semibold">Daily strategy close:</span> {data.refresh?.dailyCloseUtc ?? '00:05'} UTC</p>
+                  <p><span className="text-foreground font-semibold">Last successful update:</span> {data.refresh?.lastSuccessfulUpdateUtc ? new Date(data.refresh.lastSuccessfulUpdateUtc).toUTCString() : 'Unknown'}</p>
+                  <p>The dashboard is ready to reflect new droplet data as soon as the daily files are refreshed.</p>
                 </div>
               </div>
             </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
               <div className="panel p-5 lg:col-span-2">
-                <SectionTitle icon={<Radar size={14} className="text-primary opacity-70" />}>Next Trade Forecast</SectionTitle>
+                <SectionTitle icon={<Radar size={14} className="text-primary opacity-70" />}>Forecast Engine</SectionTitle>
                 <div className="grid md:grid-cols-3 gap-3 mb-4">
                   <div className="rounded-xl border p-3" style={{ background: 'oklch(1 0 0 / 2%)', borderColor: 'oklch(1 0 0 / 8%)' }}>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">If run now</p>
-                    <p className="text-lg font-bold mt-1" style={{ color: toneColor(planning.rule2Active || planning.rule3Active || planning.rule4Ready === false ? 'warn' : 'good') }}>{forecastAction}</p>
-                    <p className="text-xs text-muted-foreground mt-2">Direct mirror of the live rule stack.</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Action if run now</p>
+                    <p className="text-lg font-bold mt-1" style={{ color: toneColor(forecast?.rules?.rule2Active || forecast?.rules?.rule3Active || forecast?.rules?.rule4Ready === false ? 'warn' : 'good') }}>{forecast?.nextTrade?.actionIfRunNow ?? status.signalAction ?? 'HOLD'}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Separate forward-looking script output.</p>
                   </div>
                   <div className="rounded-xl border p-3" style={{ background: 'oklch(1 0 0 / 2%)', borderColor: 'oklch(1 0 0 / 8%)' }}>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Target asset</p>
-                    <p className="text-lg font-bold mt-1" style={{ color: ASSET_COLORS[String(topCandidate)] ?? 'white' }}>{topCandidate}</p>
-                    <p className="text-xs text-muted-foreground mt-2">Highest-ranked candidate if the gate stack clears.</p>
+                    <p className="text-lg font-bold mt-1" style={{ color: ASSET_COLORS[String(forecastTarget)] ?? 'white' }}>{forecastTarget}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Leading candidate from the forecast layer.</p>
                   </div>
                   <div className="rounded-xl border p-3" style={{ background: 'oklch(1 0 0 / 2%)', borderColor: 'oklch(1 0 0 / 8%)' }}>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Earliest window</p>
-                    <p className="text-lg font-bold mt-1 text-white">{planning.earliestEligibleRunLabel ?? 'Watching next close'}</p>
-                    <p className="text-xs text-muted-foreground mt-2">Forecast timing for the next eligible decision run.</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Confidence</p>
+                    <p className="text-lg font-bold mt-1 text-white">{typeof forecast?.confidence?.score === 'number' ? forecast.confidence.score.toFixed(3) : '—'}</p>
+                    <p className="text-xs text-muted-foreground mt-2">{forecast?.confidence?.label ?? 'Unknown'} · F&amp;G {forecast?.confidence?.fearGreedValue ?? '—'}</p>
                   </div>
                 </div>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div className="rounded-xl border border-border/20 p-4 bg-card/20">
                     <div className="flex items-center gap-2 mb-3">
                       <AlertTriangle size={14} className="text-primary opacity-70" />
-                      <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">Blocking Rules</p>
+                      <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">Conditions Needed</p>
                     </div>
                     <div className="space-y-2 text-sm text-muted-foreground">
-                      {blockers.length === 0 ? (
-                        <p>All major gates currently appear clear. A trade can proceed if leadership persists.</p>
-                      ) : blockers.map((blocker, index) => (
-                        <div key={`blocker-${index}`} className="rounded-lg border px-3 py-2" style={{ borderColor: 'oklch(0.78 0.18 75 / 15%)', background: 'oklch(0.78 0.18 75 / 5%)' }}>{blocker}</div>
+                      {(forecast?.nextTrade?.conditionsNeeded ?? []).length === 0 ? (
+                        <p>No additional forecast conditions are currently required beyond maintaining leadership and clearing routine close checks.</p>
+                      ) : (forecast?.nextTrade?.conditionsNeeded ?? []).map((condition, index) => (
+                        <div key={`condition-${index}`} className="rounded-lg border px-3 py-2" style={{ borderColor: 'oklch(0.72 0.18 155 / 15%)', background: 'oklch(0.72 0.18 155 / 5%)' }}>{condition}</div>
                       ))}
                     </div>
                   </div>
                   <div className="rounded-xl border border-border/20 p-4 bg-card/20">
                     <div className="flex items-center gap-2 mb-3">
                       <Target size={14} className="text-primary opacity-70" />
-                      <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">Conditions Needed</p>
+                      <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">Forecast Reason</p>
                     </div>
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      {conditionsNeeded.length === 0 ? (
-                        <p>No extra conditions are currently inferred beyond maintaining momentum leadership and normal close confirmation.</p>
-                      ) : conditionsNeeded.map((condition, index) => (
-                        <div key={`condition-${index}`} className="rounded-lg border px-3 py-2" style={{ borderColor: 'oklch(0.72 0.18 155 / 15%)', background: 'oklch(0.72 0.18 155 / 5%)' }}>{condition}</div>
-                      ))}
+                    <p className="text-sm text-muted-foreground">{forecast?.nextTrade?.reason ?? planning.nextActionSummary ?? 'Live forecast unavailable.'}</p>
+                    <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+                      <p><span className="text-foreground font-semibold">Rule 2:</span> {forecast?.rules?.rule2Active ? 'Active' : 'Clear'}</p>
+                      <p><span className="text-foreground font-semibold">Rule 3:</span> {forecast?.rules?.rule3Active ? 'Active' : 'Clear'}</p>
+                      <p><span className="text-foreground font-semibold">Rule 4:</span> {forecast?.rules?.rule4Ready === true ? 'Ready' : forecast?.rules?.rule4Ready === false ? 'Blocking' : 'Monitoring'}</p>
                     </div>
                   </div>
                 </div>
               </div>
               <div className="panel p-5">
-                <SectionTitle icon={<CalendarDays size={14} className="text-primary opacity-70" />}>Forward Outlook</SectionTitle>
+                <SectionTitle icon={<CalendarDays size={14} className="text-primary opacity-70" />}>7-Day Outlook</SectionTitle>
                 <div className="space-y-3">
-                  {forwardOutlook.map((item) => (
-                    <div key={`outlook-${item.day}`} className="rounded-xl border border-border/20 p-3 bg-card/20">
+                  {(forecast?.forwardOutlook ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No forward outlook available.</p> : (forecast?.forwardOutlook ?? []).slice(0, 7).map((item, index) => (
+                    <div key={`outlook-${index}`} className="rounded-xl border border-border/20 p-3 bg-card/20">
                       <div className="flex items-center justify-between gap-4 mb-1">
-                        <p className="text-sm font-semibold text-foreground">+{item.day}d</p>
-                        <p className="text-xs text-muted-foreground mono-data">{item.dateLabel}</p>
+                        <p className="text-sm font-semibold text-foreground">+{item.day ?? index + 1}d</p>
+                        <p className="text-xs text-muted-foreground mono-data">{item.label ?? item.dateUtc ?? `Day ${index + 1}`}</p>
                       </div>
-                      <p className="text-xs text-muted-foreground">{item.note}</p>
+                      <div className="space-y-1">
+                        {(item.notes ?? []).map((note, noteIndex) => <p key={`note-${index}-${noteIndex}`} className="text-xs text-muted-foreground">{note}</p>)}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-4">
+            <div className="grid lg:grid-cols-3 gap-4">
               <div className="panel p-5">
                 <SectionTitle icon={<ArrowUpRight size={14} className="text-primary opacity-70" />}>Momentum Ranking</SectionTitle>
                 <div className="space-y-2">
-                  {ranking.length === 0 ? <p className="text-sm text-muted-foreground">No ranking data available.</p> : ranking.slice(0, 5).map((row, index) => {
+                  {forecastRanking.length === 0 ? <p className="text-sm text-muted-foreground">No ranking data available.</p> : forecastRanking.slice(0, 5).map((row, index) => {
                     const asset = row.asset ?? row.symbol ?? '—';
                     const score = Number(row.score ?? 0);
                     return (
@@ -288,6 +350,40 @@ export default function Home() {
                 </div>
               </div>
               <div className="panel p-5">
+                <SectionTitle icon={<Shield size={14} className="text-primary opacity-70" />}>BTC Health & Confidence</SectionTitle>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p><span className="text-foreground font-semibold">Rally block:</span> {forecast?.btcHealth?.rule3Active ? 'Active' : 'Clear'}</p>
+                  <p><span className="text-foreground font-semibold">Latest 30d-high date:</span> {forecast?.btcHealth?.latestThirtyDayHighDateUtc ?? '—'}</p>
+                  <p><span className="text-foreground font-semibold">Block expires after close:</span> {forecast?.btcHealth?.blockExpiresAfterCloseUtc ?? '—'}</p>
+                  <p><span className="text-foreground font-semibold">Confidence label:</span> {forecast?.confidence?.label ?? '—'}</p>
+                  <p><span className="text-foreground font-semibold">Fear & Greed:</span> {forecast?.confidence?.fearGreedValue ?? '—'}{typeof forecast?.confidence?.fearGreedAverage === 'number' ? ` (10d avg ${forecast.confidence.fearGreedAverage.toFixed(1)})` : ''}</p>
+                </div>
+              </div>
+              <div className="panel p-5">
+                <SectionTitle icon={<Clock size={14} className="text-primary opacity-70" />}>Live Counters</SectionTitle>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  {[
+                    ['Trades', liveStrategy?.performance?.counters?.trades],
+                    ['Rotations', liveStrategy?.performance?.counters?.rotations],
+                    ['Cash Exits', liveStrategy?.performance?.counters?.cashExits],
+                    ['All-Neg Exits', liveStrategy?.performance?.counters?.allNegativeExits],
+                    ['All-Neg Blocked', liveStrategy?.performance?.counters?.allNegativeBlocked],
+                    ['Rule 2 Blocks', liveStrategy?.performance?.counters?.rule2Blocks],
+                    ['Rule 3 Blocks', liveStrategy?.performance?.counters?.rule3Blocks],
+                    ['Rule 3 Force BTC', liveStrategy?.performance?.counters?.rule3ForceBtc],
+                    ['Rule 4 Blocks', liveStrategy?.performance?.counters?.rule4Blocks],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-lg border border-border/20 px-3 py-2 bg-card/20">
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="text-lg font-bold text-white mono-data">{counterValue(value)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid lg:grid-cols-2 gap-4">
+              <div className="panel p-5">
                 <SectionTitle icon={<BellRing size={14} className="text-primary opacity-70" />}>Recent Signal History</SectionTitle>
                 <div className="space-y-3">
                   {history.length === 0 ? <p className="text-sm text-muted-foreground">No history available.</p> : history.slice(0, 5).map((row, index) => (
@@ -299,6 +395,17 @@ export default function Home() {
                       <p className="text-xs text-muted-foreground">{String((row as any).reason ?? (row as any).notes ?? (row as any).ruleReason ?? 'No reason supplied')}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+              <div className="panel p-5">
+                <SectionTitle icon={<Activity size={14} className="text-primary opacity-70" />}>Engine Alignment</SectionTitle>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p><span className="text-foreground font-semibold">Live engine action:</span> {status.signalAction ?? '—'}</p>
+                  <p><span className="text-foreground font-semibold">Forecast engine action:</span> {forecast?.nextTrade?.actionIfRunNow ?? '—'}</p>
+                  <p><span className="text-foreground font-semibold">Live candidate:</span> {liveTarget}</p>
+                  <p><span className="text-foreground font-semibold">Forecast candidate:</span> {forecastTarget}</p>
+                  <p><span className="text-foreground font-semibold">Forecast source mode:</span> {forecast?.sourceMode ?? 'unknown'}</p>
+                  <p>This page is designed to stay accurate even if the forecast engine later writes its own JSON file; the UI will use that directly when available.</p>
                 </div>
               </div>
             </div>

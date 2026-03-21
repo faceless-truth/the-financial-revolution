@@ -7,6 +7,7 @@ const STRATEGY_FILE = process.env.CRYPTO_DASHBOARD_STRATEGY_FILE ?? path.join(DA
 const SIGNAL_HISTORY_FILE = process.env.CRYPTO_DASHBOARD_SIGNAL_HISTORY_FILE ?? path.join(DASHBOARD_ROOT, "optimized_signal_history.json");
 const ANALYTICS_FILE = process.env.CRYPTO_DASHBOARD_ANALYTICS_FILE ?? path.join(DASHBOARD_ROOT, "paleologo_analytics.json");
 const SCENARIO_FILE = process.env.CRYPTO_DASHBOARD_SCENARIO_FILE ?? path.join(DASHBOARD_ROOT, "next_scenarios.json");
+const FORECAST_FILE = process.env.CRYPTO_DASHBOARD_FORECAST_FILE ?? path.join(DASHBOARD_ROOT, "next_trade_forecast.json");
 
 async function readJson<T>(filePath: string, fallback: T): Promise<T> {
   try {
@@ -26,7 +27,7 @@ function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-function toDate(value: any) {
+function toDate(value: unknown) {
   if (!value) return null;
   const d = new Date(String(value));
   return Number.isNaN(d.getTime()) ? null : d;
@@ -275,6 +276,99 @@ function computePlanningState(state: any, strategy: any, history: any[], scenari
   };
 }
 
+function deriveLiveCounters(state: any) {
+  return {
+    trades: toNumber(state?.trades ?? state?.trade_count ?? 0, 0),
+    rotations: toNumber(state?.rotations ?? state?.rotation_count ?? 0, 0),
+    cashExits: toNumber(state?.cash_exits ?? state?.cashExits ?? 0, 0),
+    allNegativeExits: toNumber(state?.all_neg_exits ?? state?.allNegativeExits ?? 0, 0),
+    allNegativeBlocked: toNumber(state?.all_neg_blocked ?? state?.allNegativeBlocked ?? 0, 0),
+    rule2Blocks: toNumber(state?.rule2_blocks ?? 0, 0),
+    rule3Blocks: toNumber(state?.rule3_blocks ?? 0, 0),
+    rule3ForceBtc: toNumber(state?.rule3_force_btc ?? state?.rule3ForceBtc ?? 0, 0),
+    rule4Blocks: toNumber(state?.rule4_blocks ?? 0, 0),
+  };
+}
+
+function buildForecastFromLiveData(snapshot: any) {
+  const ranking = Array.isArray(snapshot.preparation?.topCandidates) ? snapshot.preparation.topCandidates : [];
+  const planning = snapshot.planning ?? {};
+  const status = snapshot.summary ?? {};
+  const currentAsset = status.currentAsset ?? "CASH";
+  const breakoutPrice = snapshot.raw?.scenarios?.breakoutPrice ?? snapshot.raw?.strategy?.breakoutPrice ?? null;
+  const currentPrice = snapshot.raw?.scenarios?.currentPrice ?? null;
+  const thirtyDayHigh = snapshot.raw?.scenarios?.thirtyDayHigh ?? null;
+  const conditionsNeeded = planning.rule4Ready === false && ranking[0]?.asset
+    ? [
+        `${ranking[0].asset} must close above ${breakoutPrice ? `$${Number(breakoutPrice).toFixed(2)}` : 'its breakout threshold'}${currentPrice ? ` (currently $${Number(currentPrice).toFixed(2)}` : ''}${thirtyDayHigh ? `, 30d high $${Number(thirtyDayHigh).toFixed(2)}` : ''}${currentPrice ? ')' : ''}.`,
+      ]
+    : planning.rule3Active
+      ? ["BTC must avoid printing another 30-day high during the rally-block window."]
+      : planning.rule2Active
+        ? [`Continue holding ${currentAsset} until the 7-day minimum hold period clears.`]
+        : [];
+
+  const forwardOutlook = Array.from({ length: 7 }).map((_, index) => {
+    const day = index + 1;
+    const dateBase = planning.earliestEligibleRunUtc ? new Date(planning.earliestEligibleRunUtc) : addDays(new Date(), day);
+    const date = planning.earliestEligibleRunUtc ? addDays(dateBase, index) : dateBase;
+    let note = "No change — same blockers remain";
+    if (!planning.rule2Active && !planning.rule3Active && planning.rule4Ready !== false) {
+      note = "All key gates appear clear — trade remains possible if leadership holds";
+    } else if (planning.rule3Active && planning.earliestEligibleRunLabel && day === 1) {
+      note = `Rule 3 may clear around ${planning.earliestEligibleRunLabel} if BTC avoids another 30d high.`;
+    } else if (planning.rule2Active && day === 1) {
+      note = "Rule 2 is the nearest blocker to clear as hold days continue to accrue.";
+    } else if (planning.rule4Ready === false) {
+      note = `${planning.candidateAsset ?? ranking[0]?.asset ?? 'Leader'} still needs breakout confirmation.`;
+    }
+    return {
+      day,
+      dateUtc: formatDateUtc(date),
+      label: humanDateUtc(date),
+      notes: [note],
+    };
+  });
+
+  return {
+    generatedAtUtc: status.lastUpdate ?? new Date().toISOString(),
+    sourceMode: "inferred_from_live_data",
+    currentPosition: {
+      asset: currentAsset,
+      allocation: currentAsset === "CASH" ? 0 : 1,
+      holdDays: toNumber(status.holdDays ?? 0, 0),
+      entryPrice: toNumber(status.entryPrice ?? 0, 0),
+      entryDate: asString(status.entryDate ?? "", ""),
+      portfolioValueUsd: toNumber(status.displayedPortfolioValueUsd ?? 0, 0),
+    },
+    momentumRanking: ranking,
+    btcHealth: {
+      latestThirtyDayHighDateUtc: planning.latestThirtyDayHighDateUtc ?? "",
+      blockExpiresAfterCloseUtc: planning.blockExpiresAfterCloseUtc ?? "",
+      rule3Active: planning.rule3Active ?? false,
+    },
+    confidence: {
+      score: toNumber(snapshot.raw?.analytics?.confidenceScore ?? snapshot.raw?.strategy?.confidenceScore ?? 0, 0),
+      label: asString(snapshot.raw?.analytics?.confidenceLabel ?? snapshot.raw?.strategy?.confidenceLabel ?? "Unknown", "Unknown"),
+      fearGreedValue: toNumber(snapshot.raw?.analytics?.fearGreedValue ?? snapshot.raw?.strategy?.fearGreedValue ?? 0, 0),
+      fearGreedAverage: toNumber(snapshot.raw?.analytics?.fearGreedAverage ?? snapshot.raw?.strategy?.fearGreedAverage ?? 0, 0),
+    },
+    rules: {
+      rule2Active: planning.rule2Active ?? false,
+      rule3Active: planning.rule3Active ?? false,
+      rule4Ready: planning.rule4Ready ?? null,
+      currentBlocker: planning.currentBlocker ?? "Monitoring live conditions",
+    },
+    nextTrade: {
+      actionIfRunNow: status.signalAction ?? "HOLD",
+      targetAsset: planning.candidateAsset ?? ranking[0]?.asset ?? "",
+      reason: status.ruleReason ?? planning.currentBlocker ?? "Live mirror",
+      conditionsNeeded,
+    },
+    forwardOutlook,
+  };
+}
+
 export async function getLivePortfolioData() {
   const [state, strategy, history, analytics, scenarios] = await Promise.all([
     readJson<any>(STATE_FILE, {}),
@@ -311,6 +405,7 @@ export async function getLivePortfolioData() {
         signalHistory: SIGNAL_HISTORY_FILE,
         analytics: ANALYTICS_FILE,
         scenarios: SCENARIO_FILE,
+        forecast: FORECAST_FILE,
       },
     },
     summary: {
@@ -336,6 +431,7 @@ export async function getLivePortfolioData() {
       outperformancePct: toNumber(analytics?.outperformancePct ?? analytics?.outperformance_pct ?? 0, 0),
       unrealisedPnlUsd: toNumber(state?.unrealisedPnlUsd ?? state?.unrealised_pnl_usd ?? 0, 0),
       unrealisedPnlPct: toNumber(state?.unrealisedPnlPct ?? state?.unrealised_pnl_pct ?? 0, 0),
+      counters: deriveLiveCounters(state),
     },
     preparation: {
       readiness: asString(strategy?.readiness ?? strategy?.preparation?.readiness ?? "WATCH", "WATCH"),
@@ -356,25 +452,73 @@ export async function getLivePortfolioData() {
   };
 }
 
-export async function getLiveDashboardData() {
+export async function getForecastData() {
   const snapshot = await getLivePortfolioData();
-  const topCandidates = Array.isArray(snapshot.preparation.topCandidates) ? snapshot.preparation.topCandidates : [];
+  const directForecast = await readJson<any>(FORECAST_FILE, null);
+  if (directForecast && typeof directForecast === "object" && Object.keys(directForecast).length > 0) {
+    return {
+      ...directForecast,
+      sourceMode: "forecast_file",
+      sourceFile: FORECAST_FILE,
+    };
+  }
+
   return {
-    status: {
-      currentPosition: snapshot.summary.currentAsset,
-      signalAction: snapshot.summary.signalAction,
-      holdDays: snapshot.summary.holdDays,
-      entryPrice: snapshot.summary.entryPrice,
-      entryDate: snapshot.summary.entryDate,
-      lastUpdate: snapshot.summary.lastUpdate,
-      ruleReason: snapshot.summary.ruleReason,
-      displayedPortfolioValueUsd: snapshot.summary.displayedPortfolioValueUsd,
-      fixedCapitalUsd: snapshot.summary.fixedCapitalUsd,
+    ...buildForecastFromLiveData(snapshot),
+    sourceFile: FORECAST_FILE,
+  };
+}
+
+export async function getLiveDashboardData() {
+  const [snapshot, forecast] = await Promise.all([
+    getLivePortfolioData(),
+    getForecastData(),
+  ]);
+
+  const topCandidates = Array.isArray(snapshot.preparation.topCandidates) ? snapshot.preparation.topCandidates : [];
+
+  return {
+    liveStrategy: {
+      status: {
+        currentPosition: snapshot.summary.currentAsset,
+        signalAction: snapshot.summary.signalAction,
+        holdDays: snapshot.summary.holdDays,
+        entryPrice: snapshot.summary.entryPrice,
+        entryDate: snapshot.summary.entryDate,
+        lastUpdate: snapshot.summary.lastUpdate,
+        ruleReason: snapshot.summary.ruleReason,
+        displayedPortfolioValueUsd: snapshot.summary.displayedPortfolioValueUsd,
+        fixedCapitalUsd: snapshot.summary.fixedCapitalUsd,
+      },
+      performance: snapshot.performance,
+      preparation: snapshot.preparation,
+      planning: snapshot.planning,
+      tradeHistory: snapshot.tradeHistory,
+      ranking: topCandidates,
     },
-    ranking: topCandidates,
-    preparation: snapshot.preparation,
-    planning: snapshot.planning,
-    tradeHistory: snapshot.tradeHistory,
+    forecast,
     source: snapshot.source,
+    refresh: {
+      pollingMs: 5 * 60 * 1000,
+      dailyCloseUtc: "00:05",
+      lastSuccessfulUpdateUtc: snapshot.summary.lastUpdate,
+    },
+    legacy: {
+      status: {
+        currentPosition: snapshot.summary.currentAsset,
+        signalAction: snapshot.summary.signalAction,
+        holdDays: snapshot.summary.holdDays,
+        entryPrice: snapshot.summary.entryPrice,
+        entryDate: snapshot.summary.entryDate,
+        lastUpdate: snapshot.summary.lastUpdate,
+        ruleReason: snapshot.summary.ruleReason,
+        displayedPortfolioValueUsd: snapshot.summary.displayedPortfolioValueUsd,
+        fixedCapitalUsd: snapshot.summary.fixedCapitalUsd,
+      },
+      ranking: topCandidates,
+      preparation: snapshot.preparation,
+      planning: snapshot.planning,
+      tradeHistory: snapshot.tradeHistory,
+    },
   };
 }
