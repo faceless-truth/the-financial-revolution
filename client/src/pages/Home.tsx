@@ -31,6 +31,12 @@ type LiveStrategyStatus = {
   fixedCapitalUsd?: number;
 };
 
+type CashGuidanceLevel = {
+  cashPct?: number;
+  label?: string;
+  condition?: string;
+};
+
 type LiveDashboardSnapshot = {
   liveStrategy?: {
     status?: LiveStrategyStatus;
@@ -103,6 +109,22 @@ type LiveDashboardSnapshot = {
       targetAsset?: string;
       reason?: string;
       conditionsNeeded?: string[];
+    };
+    cashStrategy?: {
+      currentRecommendedCashPct?: number;
+      currentRecommendedRiskPct?: number;
+      triggeredBy?: string | null;
+      statusLabel?: string;
+      reason?: string;
+      reentryCondition?: string;
+      state?: {
+        btcDrawdownFrom30dHighPct?: number;
+        btc30dMomentumPct?: number;
+        allFiveNegative?: boolean;
+        rule3BlockedByHoldDays?: boolean;
+        holdDays?: number;
+      };
+      guidance?: CashGuidanceLevel[];
     };
     forwardOutlook?: Array<{
       day?: number;
@@ -203,6 +225,18 @@ export default function Home() {
   const liveTarget = planning.candidateAsset ?? liveStrategy?.preparation?.targetAsset ?? legacy?.preparation?.targetAsset ?? ranking[0]?.asset ?? ranking[0]?.symbol ?? 'Watching leaders';
   const forecastTarget = forecast?.nextTrade?.targetAsset ?? forecastRanking[0]?.asset ?? forecastRanking[0]?.symbol ?? liveTarget;
   const refreshMinutes = Math.round((data?.refresh?.pollingMs ?? 5 * 60 * 1000) / 60000);
+  const cashStrategy = forecast?.cashStrategy;
+  const fallbackDrawdown = planning.rule3Active ? 100 : planning.rule4Ready === false ? 50 : 0;
+  const recommendedCashPct = typeof cashStrategy?.currentRecommendedCashPct === 'number' ? cashStrategy.currentRecommendedCashPct : fallbackDrawdown;
+  const recommendedRiskPct = typeof cashStrategy?.currentRecommendedRiskPct === 'number' ? cashStrategy.currentRecommendedRiskPct : Math.max(0, 100 - recommendedCashPct);
+  const cashStatusLabel = cashStrategy?.statusLabel ?? (recommendedCashPct === 100 ? 'Full Cash Defense' : recommendedCashPct === 50 ? 'Reduce to 50% Allocation' : 'Remain Fully Invested');
+  const cashReason = cashStrategy?.reason ?? (recommendedCashPct === 100 ? 'A cash-exit condition is active or should be prepared for at the next close.' : recommendedCashPct === 50 ? 'BTC drawdown defense is in view; be prepared to reduce risk.' : 'No script-exported cash defense is active right now.');
+  const reentryCondition = cashStrategy?.reentryCondition ?? 'Re-entry only after BTC 30-day momentum turns positive.';
+  const cashGuidance = Array.isArray(cashStrategy?.guidance) && cashStrategy?.guidance.length > 0 ? cashStrategy.guidance : [
+    { cashPct: 50, label: 'Rule 1 warning', condition: 'BTC closes 12% or more below its 30-day high.' },
+    { cashPct: 100, label: 'Rule 1 hard exit', condition: 'BTC closes 25% or more below its 30-day high.' },
+    { cashPct: 100, label: 'Rule 3 all-negative exit', condition: 'All five assets have negative 30-day momentum after the 7-day hold window.' },
+  ];
 
   return (
     <div className="min-h-screen" style={{ background: 'oklch(0.10 0.010 260)' }}>
@@ -330,6 +364,55 @@ export default function Home() {
             </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
+              <div className="panel p-5 lg:col-span-2">
+                <SectionTitle icon={<Shield size={14} className="text-primary opacity-70" />}>Cash Defense & Re-entry</SectionTitle>
+                <div className="grid md:grid-cols-3 gap-3 mb-4">
+                  <div className="rounded-xl border p-3" style={{ background: 'oklch(1 0 0 / 2%)', borderColor: 'oklch(1 0 0 / 8%)' }}>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Recommended cash</p>
+                    <p className="text-lg font-bold mt-1" style={{ color: recommendedCashPct >= 100 ? toneColor('warn') : recommendedCashPct >= 50 ? 'oklch(0.78 0.18 75)' : toneColor('good') }}>{recommendedCashPct}%</p>
+                    <p className="text-xs text-muted-foreground mt-2">{cashStatusLabel}</p>
+                  </div>
+                  <div className="rounded-xl border p-3" style={{ background: 'oklch(1 0 0 / 2%)', borderColor: 'oklch(1 0 0 / 8%)' }}>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Risk allocation</p>
+                    <p className="text-lg font-bold mt-1 text-white">{recommendedRiskPct}%</p>
+                    <p className="text-xs text-muted-foreground mt-2">Capital that remains allocated if this cash posture is triggered.</p>
+                  </div>
+                  <div className="rounded-xl border p-3" style={{ background: 'oklch(1 0 0 / 2%)', borderColor: 'oklch(1 0 0 / 8%)' }}>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Re-entry condition</p>
+                    <p className="text-sm font-semibold mt-1 text-white">BTC 30d momentum</p>
+                    <p className="text-xs text-muted-foreground mt-2">{reentryCondition}</p>
+                  </div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-border/20 p-4 bg-card/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <AlertTriangle size={14} className="text-primary opacity-70" />
+                      <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">Active Cash Posture</p>
+                    </div>
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      <p>{cashReason}</p>
+                      <p><span className="text-foreground font-semibold">Trigger source:</span> {cashStrategy?.triggeredBy ?? 'Awaiting direct script output'}</p>
+                      <p><span className="text-foreground font-semibold">Current BTC drawdown:</span> {typeof cashStrategy?.state?.btcDrawdownFrom30dHighPct === 'number' ? `${cashStrategy.state.btcDrawdownFrom30dHighPct.toFixed(1)}%` : 'Not exported yet'}</p>
+                      <p><span className="text-foreground font-semibold">All assets negative:</span> {typeof cashStrategy?.state?.allFiveNegative === 'boolean' ? (cashStrategy.state.allFiveNegative ? 'Yes' : 'No') : 'Not exported yet'}</p>
+                      <p><span className="text-foreground font-semibold">Rule 3 blocked by hold:</span> {typeof cashStrategy?.state?.rule3BlockedByHoldDays === 'boolean' ? (cashStrategy.state.rule3BlockedByHoldDays ? 'Yes' : 'No') : 'Not exported yet'}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border/20 p-4 bg-card/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Target size={14} className="text-primary opacity-70" />
+                      <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">Cash Ladder</p>
+                    </div>
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      {cashGuidance.map((item, index) => (
+                        <div key={`cash-guidance-${index}`} className="rounded-lg border px-3 py-2" style={{ borderColor: 'oklch(1 0 0 / 8%)', background: 'oklch(1 0 0 / 3%)' }}>
+                          <p className="text-sm font-semibold text-foreground">{typeof item.cashPct === 'number' ? `${item.cashPct}% cash` : 'Cash level'}{item.label ? ` — ${item.label}` : ''}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{item.condition ?? 'Condition not supplied by script yet.'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="panel p-5">
                 <SectionTitle icon={<ArrowUpRight size={14} className="text-primary opacity-70" />}>Momentum Ranking</SectionTitle>
                 <div className="space-y-2">
