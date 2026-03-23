@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { formatLargeNumber, timeAgo } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, Clock, BellRing, ArrowUpRight, Radar, CalendarDays, Database, RefreshCw } from "lucide-react";
+import { TrendingUp, Clock, ArrowUpRight, Radar, CalendarDays, Database, RefreshCw, ShieldAlert, Target } from "lucide-react";
 
 const ASSET_COLORS: Record<string, string> = {
   BTC: "oklch(0.78 0.18 75)",
@@ -155,10 +155,24 @@ function counterValue(value: unknown) {
   return Number.isFinite(Number(value)) ? String(value) : "0";
 }
 
-function formatRuleState(value: boolean | null | undefined, positiveLabel: string, negativeLabel: string, neutralLabel = "Monitoring") {
-  if (value === true) return positiveLabel;
-  if (value === false) return negativeLabel;
-  return neutralLabel;
+function formatUsd(value: number | null | undefined) {
+  if (!Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value));
+}
+
+function extractLatestHistory(history: Array<Record<string, unknown>>) {
+  return Array.isArray(history) && history.length > 0 ? history[0] : undefined;
+}
+
+function extractBtcThirtyDayHigh(latestHistory?: Record<string, unknown>) {
+  const value = Number(latestHistory?.btc_30d_high ?? latestHistory?.btc30dHigh ?? NaN);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractBtcDrawdownPct(latestHistory?: Record<string, unknown>) {
+  const raw = Number(latestHistory?.btc_drawdown ?? latestHistory?.btcDrawdown ?? NaN);
+  if (!Number.isFinite(raw)) return null;
+  return Math.abs(raw) <= 1 ? Math.abs(raw) * 100 : Math.abs(raw);
 }
 
 export default function Home() {
@@ -207,9 +221,29 @@ export default function Home() {
   const currentAsset = status?.currentPosition ?? forecast?.currentPosition?.asset ?? "CASH";
   const assetColor = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
   const liveTarget = planning.candidateAsset ?? liveStrategy?.preparation?.targetAsset ?? legacy?.preparation?.targetAsset ?? ranking[0]?.asset ?? ranking[0]?.symbol ?? "—";
-  const forecastTarget = forecast?.nextTrade?.targetAsset ?? forecastRanking[0]?.asset ?? forecastRanking[0]?.symbol ?? "—";
   const refreshMinutes = Math.round((data?.refresh?.pollingMs ?? 5 * 60 * 1000) / 60000);
   const forwardOutlook = Array.isArray(forecast?.forwardOutlook) ? forecast.forwardOutlook.slice(0, 3) : [];
+  const latestHistory = extractLatestHistory(history);
+  const btcThirtyDayHigh = extractBtcThirtyDayHigh(latestHistory);
+  const btcDrawdownPct = extractBtcDrawdownPct(latestHistory);
+  const warningClose = btcThirtyDayHigh ? btcThirtyDayHigh * 0.88 : null;
+  const hardExitClose = btcThirtyDayHigh ? btcThirtyDayHigh * 0.75 : null;
+  const drawdownToWarning = btcDrawdownPct == null ? null : Math.max(0, 12 - btcDrawdownPct);
+  const drawdownToHardExit = btcDrawdownPct == null ? null : Math.max(0, 25 - btcDrawdownPct);
+  const rule3AllNegative = latestHistory?.all_negative === true;
+  const rule1WarningActive = btcDrawdownPct != null && btcDrawdownPct >= 12;
+  const rule1HardExitActive = btcDrawdownPct != null && btcDrawdownPct >= 25;
+  const cashStatusLabel = rule1HardExitActive
+    ? "100% cash trigger active"
+    : rule1WarningActive
+      ? "50% allocation trigger active"
+      : rule3AllNegative
+        ? "Rule 3 cash exit condition active"
+        : "No cash trigger active";
+  const cashStatusTone = rule1HardExitActive || rule3AllNegative || rule1WarningActive ? "warn" : "good";
+  const forecastReason = forecast?.nextTrade?.reason ?? "No separate forecast payload available.";
+  const forecastAction = forecast?.nextTrade?.actionIfRunNow ?? status?.signalAction ?? "HOLD";
+  const forecastTarget = forecast?.nextTrade?.targetAsset ?? liveTarget;
 
   return (
     <div className="min-h-screen" style={{ background: "oklch(0.10 0.010 260)" }}>
@@ -251,22 +285,22 @@ export default function Home() {
 
             <div className="grid lg:grid-cols-3 gap-4">
               <div className="panel p-5 lg:col-span-2">
-                <SectionTitle icon={<Database size={14} className="text-primary opacity-70" />}>Live Strategy Engine</SectionTitle>
+                <SectionTitle icon={<Database size={14} className="text-primary opacity-70" />}>What the strategy is doing now</SectionTitle>
                 <div className="grid md:grid-cols-2 gap-4 text-sm text-muted-foreground">
                   <div className="space-y-3">
-                    <p><span className="text-foreground font-semibold">Executed rule reason:</span> {status.ruleReason ?? "—"}</p>
-                    <p><span className="text-foreground font-semibold">Current blocker:</span> {planning.currentBlocker ?? "None"}</p>
-                    <p><span className="text-foreground font-semibold">Current candidate:</span> {liveTarget}</p>
+                    <p><span className="text-foreground font-semibold">Allocation now:</span> {status.currentPosition ?? "CASH"} 100%</p>
+                    <p><span className="text-foreground font-semibold">Action:</span> {status.signalAction ?? "HOLD"}</p>
+                    <p><span className="text-foreground font-semibold">Primary reason:</span> {status.ruleReason ?? "—"}</p>
                   </div>
                   <div className="space-y-3">
-                    <p><span className="text-foreground font-semibold">Earliest eligible run:</span> {planning.earliestEligibleRunLabel ?? "—"}</p>
-                    <p><span className="text-foreground font-semibold">Next action summary:</span> {planning.nextActionSummary ?? "—"}</p>
+                    <p><span className="text-foreground font-semibold">Leading asset:</span> {forecastTarget}</p>
+                    <p><span className="text-foreground font-semibold">Why no rotation yet:</span> {forecastReason}</p>
                     <p><span className="text-foreground font-semibold">Source:</span> <span className="mono-data break-all">{data.source?.root ?? "/var/lib/crypto_dashboard"}</span></p>
                   </div>
                 </div>
               </div>
               <div className="panel p-5">
-                <SectionTitle icon={<RefreshCw size={14} className="text-primary opacity-70" />}>Daily Refresh</SectionTitle>
+                <SectionTitle icon={<RefreshCw size={14} className="text-primary opacity-70" />}>Daily refresh</SectionTitle>
                 <div className="space-y-3 text-sm text-muted-foreground">
                   <p><span className="text-foreground font-semibold">Polling interval:</span> every {refreshMinutes} min</p>
                   <p><span className="text-foreground font-semibold">Daily strategy close:</span> {data.refresh?.dailyCloseUtc ?? "00:05"} UTC</p>
@@ -277,54 +311,48 @@ export default function Home() {
 
             <div className="grid lg:grid-cols-3 gap-4">
               <div className="panel p-5 lg:col-span-2">
-                <SectionTitle icon={<Radar size={14} className="text-primary opacity-70" />}>Forecast Engine</SectionTitle>
-                {!forecast ? (
-                  <p className="text-sm text-muted-foreground">No separate forecast payload is currently available.</p>
-                ) : (
-                  <>
-                    <div className="grid md:grid-cols-3 gap-3 mb-4">
-                      <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Action if run now</p>
-                        <p className="text-lg font-bold mt-1" style={{ color: toneColor(forecast?.rules?.rule2Active || forecast?.rules?.rule3Active || forecast?.rules?.rule4Ready === false ? "warn" : "good") }}>{forecast.nextTrade?.actionIfRunNow ?? "—"}</p>
-                      </div>
-                      <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Target asset</p>
-                        <p className="text-lg font-bold mt-1" style={{ color: ASSET_COLORS[String(forecastTarget)] ?? "white" }}>{forecastTarget}</p>
-                      </div>
-                      <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider">Confidence</p>
-                        <p className="text-lg font-bold mt-1 text-white">{typeof forecast.confidence?.score === "number" ? forecast.confidence.score.toFixed(3) : "—"}</p>
-                        <p className="text-xs text-muted-foreground mt-2">{forecast.confidence?.label ?? "Unknown"}</p>
-                      </div>
+                <SectionTitle icon={<Target size={14} className="text-primary opacity-70" />}>What is trying to happen next</SectionTitle>
+                <div className="grid md:grid-cols-3 gap-3 mb-4">
+                  <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Leader</p>
+                    <p className="text-lg font-bold mt-1" style={{ color: ASSET_COLORS[String(forecastTarget)] ?? "white" }}>{forecastTarget}</p>
+                  </div>
+                  <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Action if run now</p>
+                    <p className="text-lg font-bold mt-1" style={{ color: toneColor(forecastAction === "BUY" ? "good" : "warn") }}>{forecastAction}</p>
+                  </div>
+                  <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Confidence</p>
+                    <p className="text-lg font-bold mt-1 text-white">{typeof forecast?.confidence?.score === "number" ? forecast.confidence.score.toFixed(3) : "—"}</p>
+                    <p className="text-xs text-muted-foreground mt-2">{forecast?.confidence?.label ?? "Unknown"}</p>
+                  </div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-border/20 p-4 bg-card/20">
+                    <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Forecast reason</p>
+                    <p className="text-sm text-muted-foreground">{forecastReason}</p>
+                    <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+                      <p><span className="text-foreground font-semibold">Rule 2:</span> {forecast?.rules?.rule2Active ? "Active" : "Clear"}</p>
+                      <p><span className="text-foreground font-semibold">Rule 3:</span> {forecast?.rules?.rule3Active ? "Active" : "Clear"}</p>
+                      <p><span className="text-foreground font-semibold">Rule 4:</span> {forecast?.rules?.rule4Ready === false ? "Blocking" : forecast?.rules?.rule4Ready === true ? "Ready" : "Monitoring"}</p>
                     </div>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div className="rounded-xl border border-border/20 p-4 bg-card/20">
-                        <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Forecast Reason</p>
-                        <p className="text-sm text-muted-foreground">{forecast.nextTrade?.reason ?? "—"}</p>
-                        <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-                          <p><span className="text-foreground font-semibold">Rule 2:</span> {formatRuleState(forecast.rules?.rule2Active, "Active", "Clear")}</p>
-                          <p><span className="text-foreground font-semibold">Rule 3:</span> {formatRuleState(forecast.rules?.rule3Active, "Active", "Clear")}</p>
-                          <p><span className="text-foreground font-semibold">Rule 4:</span> {formatRuleState(forecast.rules?.rule4Ready, "Ready", "Blocking")}</p>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-border/20 p-4 bg-card/20">
-                        <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Conditions Needed</p>
-                        <div className="space-y-2 text-sm text-muted-foreground">
-                          {(forecast.nextTrade?.conditionsNeeded ?? []).length === 0 ? (
-                            <p>No additional forecast conditions supplied.</p>
-                          ) : (
-                            (forecast.nextTrade?.conditionsNeeded ?? []).map((condition, index) => (
-                              <div key={`condition-${index}`} className="rounded-lg border px-3 py-2" style={{ borderColor: "oklch(0.72 0.18 155 / 15%)", background: "oklch(0.72 0.18 155 / 5%)" }}>{condition}</div>
-                            ))
-                          )}
-                        </div>
-                      </div>
+                  </div>
+                  <div className="rounded-xl border border-border/20 p-4 bg-card/20">
+                    <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Conditions needed</p>
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      {(forecast?.nextTrade?.conditionsNeeded ?? []).length === 0 ? (
+                        <p>No additional forecast conditions supplied.</p>
+                      ) : (
+                        (forecast?.nextTrade?.conditionsNeeded ?? []).map((condition, index) => (
+                          <div key={`condition-${index}`} className="rounded-lg border px-3 py-2" style={{ borderColor: "oklch(0.72 0.18 155 / 15%)", background: "oklch(0.72 0.18 155 / 5%)" }}>{condition}</div>
+                        ))
+                      )}
                     </div>
-                  </>
-                )}
+                  </div>
+                </div>
               </div>
               <div className="panel p-5">
-                <SectionTitle icon={<CalendarDays size={14} className="text-primary opacity-70" />}>Short Outlook</SectionTitle>
+                <SectionTitle icon={<CalendarDays size={14} className="text-primary opacity-70" />}>Short outlook</SectionTitle>
                 <div className="space-y-3">
                   {forwardOutlook.length === 0 ? <p className="text-sm text-muted-foreground">No short outlook available.</p> : forwardOutlook.map((item, index) => (
                     <div key={`outlook-${index}`} className="rounded-xl border border-border/20 p-3 bg-card/20">
@@ -343,31 +371,50 @@ export default function Home() {
 
             <div className="grid lg:grid-cols-3 gap-4">
               <div className="panel p-5 lg:col-span-2">
-                <SectionTitle icon={<Clock size={14} className="text-primary opacity-70" />}>Cash Rules Reference</SectionTitle>
+                <SectionTitle icon={<ShieldAlert size={14} className="text-primary opacity-70" />}>Cash risk monitor</SectionTitle>
                 <div className="grid md:grid-cols-3 gap-3 mb-4">
                   <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Rule 1 warning</p>
-                    <p className="text-lg font-bold mt-1 text-white">50% allocation</p>
-                    <p className="text-xs text-muted-foreground mt-2">BTC closes 12% below its 30-day high.</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Cash status</p>
+                    <p className="text-lg font-bold mt-1" style={{ color: toneColor(cashStatusTone) }}>{cashStatusLabel}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Based on Rule 1 BTC drawdown and Rule 3 all-negative exit only.</p>
                   </div>
                   <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Rule 1 hard exit</p>
-                    <p className="text-lg font-bold mt-1 text-white">100% cash</p>
-                    <p className="text-xs text-muted-foreground mt-2">BTC closes 25% below its 30-day high.</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">BTC 30d high</p>
+                    <p className="text-lg font-bold mt-1 text-white">{formatUsd(btcThirtyDayHigh)}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Reference level for Rule 1 close triggers.</p>
                   </div>
                   <div className="rounded-xl border p-3" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Rule 3 exit</p>
-                    <p className="text-lg font-bold mt-1 text-white">100% cash</p>
-                    <p className="text-xs text-muted-foreground mt-2">All five assets negative after the 7-day hold window.</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Current BTC drawdown</p>
+                    <p className="text-lg font-bold mt-1 text-white">{btcDrawdownPct == null ? "—" : `${btcDrawdownPct.toFixed(1)}%`}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Current distance below the 30-day high.</p>
+                  </div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4 mb-4">
+                  <div className="rounded-xl border border-border/20 p-4 bg-card/20">
+                    <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Rule 1 close triggers</p>
+                    <div className="space-y-3 text-sm text-muted-foreground">
+                      <p><span className="text-foreground font-semibold">50% allocation trigger:</span> BTC daily close at or below <span className="mono-data text-foreground">{formatUsd(warningClose)}</span></p>
+                      <p><span className="text-foreground font-semibold">100% cash trigger:</span> BTC daily close at or below <span className="mono-data text-foreground">{formatUsd(hardExitClose)}</span></p>
+                      <p><span className="text-foreground font-semibold">Distance to 50% trigger:</span> {drawdownToWarning == null ? "—" : `${drawdownToWarning.toFixed(1)}% more drawdown needed`}</p>
+                      <p><span className="text-foreground font-semibold">Distance to 100% trigger:</span> {drawdownToHardExit == null ? "—" : `${drawdownToHardExit.toFixed(1)}% more drawdown needed`}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border/20 p-4 bg-card/20">
+                    <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Rule 3 cash exit</p>
+                    <div className="space-y-3 text-sm text-muted-foreground">
+                      <p><span className="text-foreground font-semibold">All assets negative now:</span> {rule3AllNegative ? "Yes" : "No"}</p>
+                      <p><span className="text-foreground font-semibold">7-day hold passed:</span> {(status.holdDays ?? 0) >= 7 ? "Yes" : "No"}</p>
+                      <p><span className="text-foreground font-semibold">Rule 3 exit active:</span> {rule3AllNegative && (status.holdDays ?? 0) >= 7 ? "Yes" : "No"}</p>
+                      <p><span className="text-foreground font-semibold">Re-entry condition:</span> BTC 30-day momentum must turn positive.</p>
+                    </div>
                   </div>
                 </div>
                 <div className="rounded-xl border border-border/20 p-4 bg-card/20 text-sm text-muted-foreground">
-                  <p><span className="text-foreground font-semibold">Important:</span> This section is a reference to your strategy rules only. It is not the active cash posture unless the forecast script exports a dedicated cash payload.</p>
-                  <p className="mt-3"><span className="text-foreground font-semibold">Re-entry:</span> Return from cash only after BTC 30-day momentum turns positive.</p>
+                  <p><span className="text-foreground font-semibold">Read this section as preparation guidance:</span> if BTC closes below the Rule 1 levels above, the cash defense becomes active on the strategy rules you provided. If all five assets are negative after the 7-day hold window, Rule 3 forces 100% cash.</p>
                 </div>
               </div>
               <div className="panel p-5">
-                <SectionTitle icon={<ArrowUpRight size={14} className="text-primary opacity-70" />}>Momentum Ranking</SectionTitle>
+                <SectionTitle icon={<ArrowUpRight size={14} className="text-primary opacity-70" />}>Momentum ranking</SectionTitle>
                 <div className="space-y-2">
                   {forecastRanking.length === 0 ? <p className="text-sm text-muted-foreground">No ranking data available.</p> : forecastRanking.slice(0, 5).map((row, index) => {
                     const asset = row.asset ?? row.symbol ?? "—";
@@ -389,7 +436,7 @@ export default function Home() {
 
             <div className="grid lg:grid-cols-2 gap-4">
               <div className="panel p-5">
-                <SectionTitle icon={<BellRing size={14} className="text-primary opacity-70" />}>Recent Signal History</SectionTitle>
+                <SectionTitle icon={<Clock size={14} className="text-primary opacity-70" />}>Recent signal history</SectionTitle>
                 <div className="space-y-3">
                   {history.length === 0 ? <p className="text-sm text-muted-foreground">No history available.</p> : history.slice(0, 5).map((row, index) => {
                     const action = String(row.action ?? "HOLD");
@@ -408,7 +455,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="panel p-5">
-                <SectionTitle icon={<Clock size={14} className="text-primary opacity-70" />}>Live Counters</SectionTitle>
+                <SectionTitle icon={<Clock size={14} className="text-primary opacity-70" />}>Live counters</SectionTitle>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   {[
                     ["Trades", liveStrategy?.performance?.counters?.trades],
