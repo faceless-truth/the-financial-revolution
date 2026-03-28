@@ -19,12 +19,14 @@ import {
 const ASSET_COLORS: Record<string, string> = {
   BTC:  "oklch(0.78 0.18 75)",
   ETH:  "oklch(0.65 0.18 255)",
+  SOL:  "oklch(0.72 0.20 310)",
   DOGE: "oklch(0.82 0.18 95)",
+  SUI:  "oklch(0.68 0.20 220)",
   CASH: "oklch(0.55 0.010 260)",
 };
 
 const ASSET_ICONS: Record<string, string> = {
-  BTC: "₿", ETH: "Ξ", DOGE: "Ð", CASH: "$",
+  BTC: "₿", ETH: "Ξ", SOL: "◎", DOGE: "Ð", SUI: "◆", CASH: "$",
 };
 
 function toneColor(tone: "good" | "warn" | "danger" | "neutral") {
@@ -201,7 +203,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>BULL_ROTATE v2.0</h1>
-              <p className="text-xs text-muted-foreground">BTC · ETH · DOGE · 30pp threshold · -15% stop · Regime Gate 65% · 10% cash-out</p>
+              <p className="text-xs text-muted-foreground">BTC · ETH · SOL · DOGE · SUI · 30pp threshold · -15% stop · Regime Gate 65% · 10% cash-out</p>
             </div>
           </div>
           <div className="flex items-center gap-3">

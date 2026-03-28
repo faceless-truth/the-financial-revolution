@@ -3,7 +3,7 @@
 BULL_ROTATE v2.0 + Regime Soft Gate + Profit Cash-Out
 ─────────────────────────────────────────────────────
 Systematic bull-market outperformance strategy.
-- Universe: BTC, ETH, DOGE
+- Universe: BTC, ETH, SOL, DOGE, SUI
 - Default holding: BTC
 - Rotation threshold: Alt composite score > BTC score + 30pp
 - Regime Soft Gate: Block new alt rotations if BTC regime confidence >= 65%
@@ -37,7 +37,7 @@ LOG_FILE            = os.path.join(DASHBOARD_ROOT, "bull_rotate.log")
 
 BINANCE_API_URL     = "https://api.binance.com/api/v3/klines"
 
-ASSETS              = ['BTC', 'ETH', 'DOGE']
+ASSETS              = ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI']
 SCORE_WEIGHTS       = (0.5, 0.3, 0.2)  # 30d, 14d, 7d
 ROTATION_THRESHOLD  = 30.0
 STOP_LOSS_PCT       = 0.15
