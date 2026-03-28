@@ -1,6 +1,6 @@
 /**
- * BULL_ROTATE v2.0 — Server Data Adapter
- * ────────────────────────────────────────
+ * BULL_ROTATE v2.0 + Regime Soft Gate + Profit Cash-Out — Server Data Adapter
+ * ─────────────────────────────────────────────────────────────────────────────
  * Reads state files written by the bull_rotate.py script on the droplet
  * and exposes clean, typed snapshots to the frontend via /api/live-dashboard
  * and /api/live-portfolio endpoints.
@@ -8,6 +8,13 @@
  * Expected files (all under CRYPTO_DASHBOARD_ROOT):
  *   bull_rotate_state.json   — latest strategy state written by Python script
  *   bull_rotate_history.json — rolling 100-record trade history
+ *
+ * New fields in v2.0 + Regime + Cash-Out:
+ *   state.reserve_usd        — accumulated profit cash-out reserve
+ *   state.total_wealth_usd   — portfolio + reserve combined
+ *   market_data.BTC.regime_conf — BTC regime confidence (0-100)
+ *   history[].cashout_amount — amount cashed out on that trade
+ *   history[].regime_conf    — regime confidence at time of trade
  */
 
 import fs from "fs/promises";
@@ -229,12 +236,18 @@ export async function getLivePortfolioData() {
   const entryDate         = asString(state?.entry_date,         "");
   const holdDays          = toNumber(state?.hold_days,          0);
   const portfolioValue    = toNumber(state?.portfolio_value_usd, 10000);
+  const reserveUsd        = toNumber(state?.reserve_usd,        0);
+  const totalWealthUsd    = toNumber(state?.total_wealth_usd,   portfolioValue + reserveUsd);
   const lastUpdate        = asString(state?.last_update,        "");
   const action            = asString(state?.action,             "HOLD");
   const reason            = asString(state?.reason,             "");
   const fixedCapital      = 10000;
   const pnlUsd            = portfolioValue - fixedCapital;
   const totalReturnPct    = (pnlUsd / fixedCapital) * 100;
+  const totalWealthReturnPct = ((totalWealthUsd - fixedCapital) / fixedCapital) * 100;
+  const regimeConf        = toNumber(state?.market_data?.BTC?.regime_conf, 0);
+  const regimeLabel       = regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending";
+  const regimeTone        = regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good";
 
   const readiness         = deriveReadiness(state, history);
   const ranking           = buildRanking(state);
@@ -247,10 +260,13 @@ export async function getLivePortfolioData() {
   const signalDescription = describeAction(action, currentPosition, reason);
 
   // Counters from history
-  const rotations   = history.filter(r => r.action === "ROTATE").length;
-  const crashExits  = history.filter(r => r.action === "CRASH_EXIT").length;
-  const stopFires   = history.filter(r => r.action === "STOP_CASH" || r.action === "STOP_TO_BTC").length;
-  const cashDays    = history.filter(r => r.position === "CASH").length;
+  const rotations    = history.filter(r => r.action === "ROTATE").length;
+  const crashExits   = history.filter(r => r.action === "CRASH_EXIT").length;
+  const stopFires    = history.filter(r => r.action === "STOP_CASH" || r.action === "STOP_TO_BTC").length;
+  const cashDays     = history.filter(r => r.position === "CASH").length;
+  const cashoutFires = history.filter(r => (r.cashout_amount ?? 0) > 0).length;
+  const totalCashedOut = history.reduce((sum, r) => sum + toNumber(r.cashout_amount, 0), 0);
+  const regimeBlocks = history.filter(r => r.action === "HOLD" && (r.reason ?? "").includes("choppy regime")).length;
 
   return {
     source: {
@@ -263,6 +279,9 @@ export async function getLivePortfolioData() {
       fixedCapitalUsd:            fixedCapital,
       displayedPortfolioValueUsd: portfolioValue,
       liveStrategyValueUsd:       portfolioValue,
+      reserveUsd,
+      totalWealthUsd,
+      totalWealthReturnPct,
       pnlUsd,
       totalReturnPct,
       currentAsset:               currentPosition,
@@ -273,6 +292,9 @@ export async function getLivePortfolioData() {
       entryPrice,
       entryDate,
       marketRegime:               cashRisk.crashActive ? "CRASH" : cashRisk.btcDd30 <= -0.15 ? "CAUTION" : "BULL",
+      regimeConf,
+      regimeLabel,
+      regimeTone,
       regimeConfidence:           readiness.label,
       confidenceLabel:            readiness.label,
     },
@@ -287,6 +309,9 @@ export async function getLivePortfolioData() {
         crashExits,
         stopFires,
         cashDays,
+        cashoutFires,
+        totalCashedOut,
+        regimeBlocks,
         totalTrades: rotations + crashExits + stopFires,
       },
     },

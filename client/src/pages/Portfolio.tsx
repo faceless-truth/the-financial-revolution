@@ -168,11 +168,17 @@ export default function Portfolio() {
   const currentAsset = summary?.currentAsset ?? "CASH";
   const assetColor   = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
 
-  const portfolioVal = summary?.displayedPortfolioValueUsd ?? 10000;
-  const fixedCap     = summary?.fixedCapitalUsd ?? 10000;
-  const pnlUsd       = portfolioVal - fixedCap;
-  const pnlPct       = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
-  const pnlColor     = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
+  const portfolioVal      = summary?.displayedPortfolioValueUsd ?? 10000;
+  const reserveUsd        = (summary as any)?.reserveUsd ?? 0;
+  const totalWealthUsd    = (summary as any)?.totalWealthUsd ?? portfolioVal + reserveUsd;
+  const totalWealthRetPct = (summary as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 10000) / 10000 * 100);
+  const fixedCap          = summary?.fixedCapitalUsd ?? 10000;
+  const pnlUsd            = portfolioVal - fixedCap;
+  const pnlPct            = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
+  const pnlColor          = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
+  const regimeConf        = (summary as any)?.regimeConf ?? 0;
+  const regimeLabel       = (summary as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
+  const regimeTone        = (summary as any)?.regimeTone ?? (regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good");
 
   // Current position unrealised P&L
   const entryPrice   = summary?.entryPrice ?? 0;
@@ -238,10 +244,26 @@ export default function Portfolio() {
           <>
             {/* ── Top stat cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Portfolio Value" value={formatLargeNumber(portfolioVal)} sub={`Fixed capital ${formatUsd(fixedCap)}`} color="oklch(0.72 0.18 155)" icon={<DollarSign size={14} />} />
-              <StatCard label="Total P&L" value={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)}`} sub={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}% since inception`} color={pnlColor} icon={<ArrowUpRight size={14} />} />
-              <StatCard label="Current Position" value={currentAsset} sub={summary.entryDate ? `Entered ${summary.entryDate} · ${summary.holdDays ?? 0}d held` : "Awaiting position"} color={assetColor} icon={<Activity size={14} />} />
+              <StatCard label="Active Portfolio" value={formatLargeNumber(portfolioVal)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} icon={<DollarSign size={14} />} />
+              <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" icon={<ArrowUpRight size={14} />} />
+              <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
               <StatCard label="Unrealised P&L" value={`${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}%`} sub={entryPrice > 0 ? `Entry ${formatUsd(entryPrice)}` : "No open position"} color={unrealisedColor} icon={<BarChart2 size={14} />} />
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Current Position" value={currentAsset} sub={summary.entryDate ? `Entered ${summary.entryDate} · ${summary.holdDays ?? 0}d held` : "Awaiting position"} color={assetColor} icon={<Activity size={14} />} />
+              <StatCard label="Total P&L" value={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)}`} sub={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}% active portfolio only`} color={pnlColor} icon={<ArrowUpRight size={14} />} />
+              <div className="panel p-4 flex flex-col gap-1" style={{ borderColor: `${toneColor(regimeTone as any)}25` }}>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-muted-foreground">BTC Regime</p>
+                </div>
+                <p className="text-2xl font-bold mono-data" style={{ fontFamily: "Syne, sans-serif", color: toneColor(regimeTone as any) }}>{regimeLabel}</p>
+                <p className="text-xs text-muted-foreground/60 mono-data">{regimeConf > 0 ? `${regimeConf.toFixed(1)}% range confidence` : "Awaiting data"}</p>
+              </div>
+              <div className="panel p-4 flex flex-col gap-1" style={{ borderColor: regimeConf >= 65 ? "oklch(0.78 0.18 75 / 25%)" : "oklch(0.72 0.18 155 / 25%)" }}>
+                <p className="text-xs text-muted-foreground">Regime Gate</p>
+                <p className="text-2xl font-bold mono-data" style={{ fontFamily: "Syne, sans-serif", color: regimeConf >= 65 ? toneColor("warn") : toneColor("good") }}>{regimeConf >= 65 ? "BLOCKING" : "CLEAR"}</p>
+                <p className="text-xs text-muted-foreground/60 mono-data">{regimeConf >= 65 ? "Alt rotations blocked" : "Alt rotations eligible"}</p>
+              </div>
             </div>
 
             {/* ── Position detail + rotation readiness ── */}
@@ -307,10 +329,11 @@ export default function Portfolio() {
             </div>
 
             {/* ── Performance stats ── */}
-            <div className="grid lg:grid-cols-3 gap-4">
-              <StatCard label="Total Return" value={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`} sub={`${pnlUsd >= 0 ? "+" : ""}${formatUsd(pnlUsd)} vs ${formatUsd(fixedCap)} fixed capital`} color={pnlColor} icon={<TrendingUp size={14} />} />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Total Return (Active)" value={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`} sub={`${pnlUsd >= 0 ? "+" : ""}${formatUsd(pnlUsd)} active portfolio`} color={pnlColor} icon={<TrendingUp size={14} />} />
+              <StatCard label="Total Return (Wealth)" value={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}%`} sub={`Portfolio + reserve vs ${formatUsd(fixedCap)} start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
               <StatCard label="Total Trades" value={String(performance?.counters?.totalTrades ?? 0)} sub={`${performance?.counters?.rotations ?? 0} rotations · ${performance?.counters?.stopFires ?? 0} stops · ${performance?.counters?.crashExits ?? 0} crashes`} color="oklch(0.60 0.22 255)" icon={<Zap size={14} />} />
-              <StatCard label="Days in Cash" value={String(performance?.counters?.cashDays ?? 0)} sub="Total days strategy held CASH" color="oklch(0.55 0.010 260)" icon={<Shield size={14} />} />
+              <StatCard label="Cash-Out Events" value={String((performance?.counters as any)?.cashoutFires ?? 0)} sub={`${formatLargeNumber((performance?.counters as any)?.totalCashedOut ?? 0)} total cashed out to reserve`} color="oklch(0.82 0.18 95)" icon={<DollarSign size={14} />} />
             </div>
 
             {/* ── Cash risk summary ── */}
@@ -351,9 +374,12 @@ export default function Portfolio() {
                   const date   = String((row as any).date ?? (row as any).timestamp ?? `Record ${index + 1}`);
                   const val    = Number((row as any).portfolio_value ?? (row as any).portfolioValue ?? 0);
                   const posColor = ASSET_COLORS[pos] ?? "white";
+                  const cashoutAmt = Number((row as any).cashout_amount ?? 0);
+                  const regConf    = Number((row as any).regime_conf ?? 0);
                   const isRotation = act === "ROTATE" || act === "REENTER_BTC";
                   const isStop     = act === "STOP_CASH" || act === "STOP_TO_BTC";
                   const isCrash    = act === "CRASH_EXIT";
+                  const isCashout  = cashoutAmt > 0;
                   const tagColor   = isRotation ? toneColor("good") : isStop ? toneColor("warn") : isCrash ? toneColor("danger") : "oklch(0.55 0.010 260)";
                   return (
                     <div key={`hist-${index}`} className="rounded-xl border border-border/20 p-3 bg-card/20">
@@ -362,6 +388,16 @@ export default function Portfolio() {
                           <span className="text-xs font-bold mono-data text-muted-foreground">{date}</span>
                           <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: `${posColor}15`, color: posColor }}>{pos}</span>
                           <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: `${tagColor}15`, color: tagColor }}>{act}</span>
+                          {isCashout && (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "oklch(0.82 0.18 95 / 15%)", color: "oklch(0.82 0.18 95)" }}>
+                              💰 +{formatLargeNumber(cashoutAmt)} to reserve
+                            </span>
+                          )}
+                          {regConf >= 65 && (
+                            <span className="text-xs px-2 py-0.5 rounded" style={{ background: "oklch(0.78 0.18 75 / 12%)", color: "oklch(0.78 0.18 75)" }}>
+                              Regime {regConf.toFixed(0)}%
+                            </span>
+                          )}
                         </div>
                         {val > 0 && <span className="text-xs mono-data text-muted-foreground">{formatUsd(val)}</span>}
                       </div>

@@ -159,7 +159,7 @@ export default function Home() {
   }, []);
 
   const ls        = data?.liveStrategy;
-  const status    = ls?.status;
+  const status    = (ls?.status ?? (data as any)?.summary) as any;
   const cashRisk  = ls?.cashRisk;
   const ranking   = ls?.ranking ?? [];
   const prep      = ls?.preparation;
@@ -167,13 +167,19 @@ export default function Home() {
   const forecast  = data?.forecast;
   const history   = useMemo(() => Array.isArray(ls?.tradeHistory) ? ls!.tradeHistory! : [], [ls]);
 
-  const currentPos    = status?.currentPosition ?? "CASH";
+  const currentPos    = status?.currentPosition ?? status?.currentAsset ?? "CASH";
   const assetColor    = ASSET_COLORS[currentPos] ?? ASSET_COLORS.CASH;
   const portfolioVal  = status?.displayedPortfolioValueUsd ?? 10000;
+  const reserveUsd    = (status as any)?.reserveUsd ?? 0;
+  const totalWealthUsd = (status as any)?.totalWealthUsd ?? portfolioVal + reserveUsd;
+  const totalWealthReturnPct = (status as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 10000) / 10000 * 100);
   const fixedCap      = status?.fixedCapitalUsd ?? 10000;
   const pnlUsd        = portfolioVal - fixedCap;
   const pnlPct        = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
   const pnlColor      = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
+  const regimeConf    = (status as any)?.regimeConf ?? 0;
+  const regimeLabel   = (status as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
+  const regimeTone    = (status as any)?.regimeTone ?? (regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good");
 
   const refreshMinutes = Math.round((data?.refresh?.pollingMs ?? 300000) / 60000);
   const cashStatusTone = cashRisk?.statusTone ?? "good";
@@ -195,7 +201,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>BULL_ROTATE v2.0</h1>
-              <p className="text-xs text-muted-foreground">BTC · ETH · DOGE · 30pp rotation threshold · -15% stop loss</p>
+              <p className="text-xs text-muted-foreground">BTC · ETH · DOGE · 30pp threshold · -15% stop · Regime Gate 65% · 10% cash-out</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -233,9 +239,23 @@ export default function Home() {
             {/* ── Top stat cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Current Position" value={currentPos} sub={status.entryDate ? `Entered ${status.entryDate}` : "Awaiting position"} color={assetColor} />
-              <StatCard label="Portfolio Value" value={formatLargeNumber(portfolioVal)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} />
+              <StatCard label="Active Portfolio" value={formatLargeNumber(portfolioVal)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} />
+              <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" />
+              <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthReturnPct >= 0 ? "+" : ""}${totalWealthReturnPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" />
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Last Signal" value={status.signalAction ?? "HOLD"} sub={status.ruleReason ?? "—"} color="oklch(0.72 0.18 155)" />
               <StatCard label="Hold Days" value={String(status.holdDays ?? 0)} sub={status.lastUpdate ? `Updated ${timeAgo(new Date(status.lastUpdate))}` : "No timestamp"} color="oklch(0.78 0.18 75)" />
+              <div className="panel p-4 flex flex-col gap-1" style={{ borderColor: `${toneColor(regimeTone as any)}25` }}>
+                <p className="text-xs text-muted-foreground">BTC Regime</p>
+                <p className="text-2xl font-bold mono-data" style={{ fontFamily: "Syne, sans-serif", color: toneColor(regimeTone as any) }}>{regimeLabel}</p>
+                <p className="text-xs text-muted-foreground/60 mono-data">{regimeConf > 0 ? `${regimeConf.toFixed(1)}% range confidence` : "Awaiting data"}</p>
+              </div>
+              <div className="panel p-4 flex flex-col gap-1" style={{ borderColor: regimeConf >= 65 ? "oklch(0.78 0.18 75 / 25%)" : "oklch(0.72 0.18 155 / 25%)" }}>
+                <p className="text-xs text-muted-foreground">Regime Gate</p>
+                <p className="text-2xl font-bold mono-data" style={{ fontFamily: "Syne, sans-serif", color: regimeConf >= 65 ? toneColor("warn") : toneColor("good") }}>{regimeConf >= 65 ? "BLOCKING" : "CLEAR"}</p>
+                <p className="text-xs text-muted-foreground/60 mono-data">{regimeConf >= 65 ? "Alt rotations blocked — choppy market" : "Alt rotations eligible"}</p>
+              </div>
             </div>
 
             {/* ── Strategy status + refresh ── */}
@@ -386,17 +406,29 @@ export default function Home() {
             {/* ── Performance counters ── */}
             <div className="panel p-5">
               <SectionTitle icon={<Zap size={14} className="text-primary opacity-70" />}>Strategy performance counters</SectionTitle>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                 {[
                   { label: "Total Trades",   value: ls?.performance?.counters?.totalTrades ?? 0 },
                   { label: "Rotations",      value: ls?.performance?.counters?.rotations ?? 0 },
                   { label: "Crash Exits",    value: ls?.performance?.counters?.crashExits ?? 0 },
                   { label: "Stop Fires",     value: ls?.performance?.counters?.stopFires ?? 0 },
-                  { label: "Days in Cash",   value: ls?.performance?.counters?.cashDays ?? 0 },
                 ].map(({ label, value }) => (
                   <div key={label} className="rounded-xl border p-3 text-center" style={{ background: "oklch(1 0 0 / 2%)", borderColor: "oklch(1 0 0 / 8%)" }}>
                     <p className="text-xs text-muted-foreground">{label}</p>
                     <p className="text-2xl font-bold mono-data mt-1 text-white" style={{ fontFamily: "Syne, sans-serif" }}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: "Days in Cash",      value: ls?.performance?.counters?.cashDays ?? 0, color: undefined },
+                  { label: "Regime Blocks",     value: (ls?.performance?.counters as any)?.regimeBlocks ?? 0, color: "oklch(0.78 0.18 75)" },
+                  { label: "Cash-Out Events",   value: (ls?.performance?.counters as any)?.cashoutFires ?? 0, color: "oklch(0.82 0.18 95)" },
+                  { label: "Total Cashed Out",  value: formatLargeNumber((ls?.performance?.counters as any)?.totalCashedOut ?? 0), color: "oklch(0.72 0.18 155)" },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded-xl border p-3 text-center" style={{ background: "oklch(1 0 0 / 2%)", borderColor: color ? `${color}20` : "oklch(1 0 0 / 8%)" }}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-2xl font-bold mono-data mt-1" style={{ fontFamily: "Syne, sans-serif", color: color ?? "white" }}>{value}</p>
                   </div>
                 ))}
               </div>
