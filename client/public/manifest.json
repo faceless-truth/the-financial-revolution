@@ -1,7 +1,7 @@
 {
   "name": "The Financial Revolution",
   "short_name": "TFR",
-  "description": "TREND_CONFIRM v7.1 Conservative — Live crypto strategy dashboard",
+  "description": "BULL_ROTATE v2.0 — BTC-default rotation strategy with 30pp threshold and -15% stop loss. Live crypto portfolio dashboard.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A0A0A",
