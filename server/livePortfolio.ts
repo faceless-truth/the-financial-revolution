@@ -237,13 +237,13 @@ export async function getLivePortfolioData() {
   const entryPrice        = toNumber(state?.entry_price,        0);
   const entryDate         = asString(state?.entry_date,         "");
   const holdDays          = toNumber(state?.hold_days,          0);
-  const portfolioValue    = toNumber(state?.portfolio_value_usd, 10000);
+  const portfolioValue    = toNumber(state?.portfolio_value_usd, 67428);
   const reserveUsd        = toNumber(state?.reserve_usd,        0);
   const totalWealthUsd    = toNumber(state?.total_wealth_usd,   portfolioValue + reserveUsd);
   const lastUpdate        = asString(state?.last_update,        "");
   const action            = asString(state?.action,             "HOLD");
   const reason            = asString(state?.reason,             "");
-  const fixedCapital      = 10000;
+  const fixedCapital      = 67428;
   const pnlUsd            = portfolioValue - fixedCapital;
   const totalReturnPct    = (pnlUsd / fixedCapital) * 100;
   const totalWealthReturnPct = ((totalWealthUsd - fixedCapital) / fixedCapital) * 100;

@@ -213,7 +213,7 @@ def load_state() -> dict:
         "entry_price": 0.0,
         "entry_date": "",
         "hold_days": 0,
-        "portfolio_value_usd": 10000.0,
+        "portfolio_value_usd": 67428.0,
         "reserve_usd": 0.0,
         "last_update": ""
     }
@@ -274,7 +274,7 @@ def run_strategy():
     current_pos = state.get("current_position", "CASH")
     entry_price = state.get("entry_price", 0.0)
     hold_days = state.get("hold_days", 0)
-    portfolio_value = state.get("portfolio_value_usd", 10000.0)
+    portfolio_value = state.get("portfolio_value_usd", 67428.0)
     reserve_usd = state.get("reserve_usd", 0.0)
     
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")

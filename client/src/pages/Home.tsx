@@ -171,11 +171,11 @@ export default function Home() {
 
   const currentPos    = status?.currentPosition ?? status?.currentAsset ?? "CASH";
   const assetColor    = ASSET_COLORS[currentPos] ?? ASSET_COLORS.CASH;
-  const portfolioVal  = status?.displayedPortfolioValueUsd ?? 10000;
+  const portfolioVal  = status?.displayedPortfolioValueUsd ?? 67428;
   const reserveUsd    = (status as any)?.reserveUsd ?? 0;
   const totalWealthUsd = (status as any)?.totalWealthUsd ?? portfolioVal + reserveUsd;
-  const totalWealthReturnPct = (status as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 10000) / 10000 * 100);
-  const fixedCap      = status?.fixedCapitalUsd ?? 10000;
+  const totalWealthReturnPct = (status as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 67428) / 67428 * 100);
+  const fixedCap      = status?.fixedCapitalUsd ?? 67428;
   const pnlUsd        = portfolioVal - fixedCap;
   const pnlPct        = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
   const pnlColor      = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");

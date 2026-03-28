@@ -170,11 +170,11 @@ export default function Portfolio() {
   const currentAsset = summary?.currentAsset ?? "CASH";
   const assetColor   = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
 
-  const portfolioVal      = summary?.displayedPortfolioValueUsd ?? 10000;
+  const portfolioVal      = summary?.displayedPortfolioValueUsd ?? 67428;
   const reserveUsd        = (summary as any)?.reserveUsd ?? 0;
   const totalWealthUsd    = (summary as any)?.totalWealthUsd ?? portfolioVal + reserveUsd;
-  const totalWealthRetPct = (summary as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 10000) / 10000 * 100);
-  const fixedCap          = summary?.fixedCapitalUsd ?? 10000;
+  const totalWealthRetPct = (summary as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 67428) / 67428 * 100);
+  const fixedCap          = summary?.fixedCapitalUsd ?? 67428;
   const pnlUsd            = portfolioVal - fixedCap;
   const pnlPct            = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
   const pnlColor          = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
