@@ -169,6 +169,17 @@ export default function Home() {
   const forecast  = data?.forecast;
   const history   = useMemo(() => Array.isArray(ls?.tradeHistory) ? ls!.tradeHistory! : [], [ls]);
 
+  // Daily close: BTC price recorded at the most recent script run
+  const lastDailyClose = useMemo(() => {
+    if (history.length === 0) return null;
+    const v = Number((history[0] as any).btc_price ?? 0);
+    return v > 0 ? v : null;
+  }, [history]);
+  const lastDailyCloseDate = useMemo(() => {
+    if (history.length === 0) return null;
+    return String((history[0] as any).date ?? "");
+  }, [history]);
+
   const currentPos    = status?.currentPosition ?? status?.currentAsset ?? "CASH";
   const assetColor    = ASSET_COLORS[currentPos] ?? ASSET_COLORS.CASH;
   const portfolioVal  = status?.displayedPortfolioValueUsd ?? 67428;
@@ -247,6 +258,7 @@ export default function Home() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Last Signal" value={status.signalAction ?? "HOLD"} sub={status.ruleReason ?? "—"} color="oklch(0.72 0.18 155)" />
               <StatCard label="Hold Days" value={String(status.holdDays ?? 0)} sub={status.lastUpdate ? `Updated ${timeAgo(new Date(status.lastUpdate))}` : "No timestamp"} color="oklch(0.78 0.18 75)" />
+              <StatCard label="Last Daily Close" value={lastDailyClose != null ? formatUsd(lastDailyClose) : "—"} sub={lastDailyCloseDate ? `Recorded ${lastDailyCloseDate} at script run` : "Awaiting first run"} color="oklch(0.78 0.18 75)" />
               <div className="panel p-4 flex flex-col gap-1" style={{ borderColor: `${toneColor(regimeTone as any)}25` }}>
                 <p className="text-xs text-muted-foreground">BTC Regime</p>
                 <p className="text-2xl font-bold mono-data" style={{ fontFamily: "Syne, sans-serif", color: toneColor(regimeTone as any) }}>{regimeLabel}</p>
@@ -448,11 +460,12 @@ export default function Home() {
                 {history.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No trade history available yet.</p>
                 ) : history.slice(0, 15).map((row, i) => {
-                  const pos    = String((row as any).position ?? (row as any).current_position ?? "—");
-                  const act    = String((row as any).action ?? "—");
-                  const reason = String((row as any).reason ?? "—");
-                  const date   = String((row as any).date ?? (row as any).timestamp ?? `Record ${i + 1}`);
-                  const val    = Number((row as any).portfolio_value ?? (row as any).portfolioValue ?? 0);
+                  const pos      = String((row as any).position ?? (row as any).current_position ?? "—");
+                  const act      = String((row as any).action ?? "—");
+                  const reason   = String((row as any).reason ?? "—");
+                  const date     = String((row as any).date ?? (row as any).timestamp ?? `Record ${i + 1}`);
+                  const val      = Number((row as any).portfolio_value ?? (row as any).portfolioValue ?? 0);
+                  const btcClose = Number((row as any).btc_price ?? 0);
                   const posColor = ASSET_COLORS[pos] ?? "white";
                   return (
                     <div key={i} className="rounded-xl border border-border/20 p-3 bg-card/20">
@@ -462,7 +475,10 @@ export default function Home() {
                           <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: `${posColor}15`, color: posColor }}>{pos}</span>
                           <span className="text-xs text-muted-foreground">{act}</span>
                         </div>
-                        {val > 0 && <span className="text-xs mono-data text-muted-foreground">{formatUsd(val)}</span>}
+                        <div className="flex items-center gap-2 text-right">
+                          {btcClose > 0 && <span className="text-xs mono-data font-semibold" style={{ color: "oklch(0.78 0.18 75)" }}>₿ {formatUsd(btcClose)}</span>}
+                          {val > 0 && <span className="text-xs mono-data text-muted-foreground">{formatUsd(val)}</span>}
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground pl-1">{reason}</p>
                     </div>
