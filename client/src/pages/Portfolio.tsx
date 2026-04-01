@@ -190,6 +190,18 @@ export default function Portfolio() {
     : 0;
   const unrealisedColor = unrealisedPct >= 0 ? toneColor("good") : toneColor("danger");
 
+  // Daily close: use the most recent history record's btc_price (recorded at script run time)
+  const lastDailyClose = useMemo(() => {
+    if (!Array.isArray(data?.tradeHistory) || data!.tradeHistory!.length === 0) return null;
+    // history is already reversed (newest first) from the server
+    const btcPriceVal = Number((data!.tradeHistory![0] as any).btc_price ?? 0);
+    return btcPriceVal > 0 ? btcPriceVal : null;
+  }, [data]);
+  const lastDailyCloseDate = useMemo(() => {
+    if (!Array.isArray(data?.tradeHistory) || data!.tradeHistory!.length === 0) return null;
+    return String((data!.tradeHistory![0] as any).date ?? "");
+  }, [data]);
+
   return (
     <div className="min-h-screen" style={{ background: "oklch(0.10 0.010 260)" }}>
       {/* ── Header ── */}
@@ -249,7 +261,8 @@ export default function Portfolio() {
               <StatCard label="Active Portfolio" value={formatLargeNumber(portfolioVal)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} icon={<DollarSign size={14} />} />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" icon={<ArrowUpRight size={14} />} />
               <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
-              <StatCard label="Unrealised P&L" value={`${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}%`} sub={entryPrice > 0 ? `Entry ${formatUsd(entryPrice)}` : "No open position"} color={unrealisedColor} icon={<BarChart2 size={14} />} />
+              <StatCard label="Unrealised P&L" value={`${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}%`} sub={`Entry ${formatUsd(entryPrice)}`} color={unrealisedColor} icon={<BarChart2 size={14} />} />
+              <StatCard label="Last Daily Close" value={lastDailyClose != null ? formatUsd(lastDailyClose) : "—"} sub={lastDailyCloseDate ? `Recorded ${lastDailyCloseDate} at script run` : "Awaiting first run"} color="oklch(0.60 0.22 255)" icon={<Clock size={14} />} />
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Current Position" value={currentAsset} sub={summary.entryDate ? `Entered ${summary.entryDate} · ${summary.holdDays ?? 0}d held` : "Awaiting position"} color={assetColor} icon={<Activity size={14} />} />
@@ -378,6 +391,7 @@ export default function Portfolio() {
                   const posColor = ASSET_COLORS[pos] ?? "white";
                   const cashoutAmt = Number((row as any).cashout_amount ?? 0);
                   const regConf    = Number((row as any).regime_conf ?? 0);
+                  const btcClose   = Number((row as any).btc_price ?? 0);
                   const isRotation = act === "ROTATE" || act === "REENTER_BTC";
                   const isStop     = act === "STOP_CASH" || act === "STOP_TO_BTC";
                   const isCrash    = act === "CRASH_EXIT";
@@ -401,7 +415,12 @@ export default function Portfolio() {
                             </span>
                           )}
                         </div>
-                        {val > 0 && <span className="text-xs mono-data text-muted-foreground">{formatUsd(val)}</span>}
+                        <div className="flex items-center gap-2 text-right">
+                          {btcClose > 0 && (
+                            <span className="text-xs mono-data font-semibold" style={{ color: "oklch(0.78 0.18 75)" }}>₿ {formatUsd(btcClose)}</span>
+                          )}
+                          {val > 0 && <span className="text-xs mono-data text-muted-foreground">{formatUsd(val)}</span>}
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground pl-1">{reason}</p>
                     </div>
