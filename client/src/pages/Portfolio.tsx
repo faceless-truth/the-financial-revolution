@@ -239,9 +239,6 @@ export default function Portfolio() {
           </div>
         </div>
         <div className="container flex items-center gap-1 pb-0 pt-0 border-t border-border/20">
-          <Link href="/">
-            <div className="px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors">Strategy Dashboard</div>
-          </Link>
           <div className="px-4 py-2.5 text-xs font-semibold border-b-2 cursor-default" style={{ color: "oklch(0.72 0.18 155)", borderColor: "oklch(0.72 0.18 155)" }}>My Portfolio</div>
         </div>
       </header>
