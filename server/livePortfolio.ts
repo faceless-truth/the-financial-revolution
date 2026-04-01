@@ -361,6 +361,14 @@ export async function getLiveDashboardData() {
         ruleReason:                 summary.ruleReason,
         displayedPortfolioValueUsd: summary.displayedPortfolioValueUsd,
         fixedCapitalUsd:            summary.fixedCapitalUsd,
+        // Regime fields — required for BTC Regime and Regime Gate cards
+        regimeConf:                 summary.regimeConf,
+        regimeLabel:                summary.regimeLabel,
+        regimeTone:                 summary.regimeTone,
+        // Wealth fields
+        reserveUsd:                 summary.reserveUsd,
+        totalWealthUsd:             summary.totalWealthUsd,
+        totalWealthReturnPct:       summary.totalWealthReturnPct,
       },
       performance: snapshot.performance,
       preparation,
