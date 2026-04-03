@@ -182,13 +182,22 @@ export default function Portfolio() {
   const regimeLabel       = (summary as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
   const regimeTone        = (summary as any)?.regimeTone ?? (regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good");
 
-  // Current position unrealised P&L
-  const entryPrice   = summary?.entryPrice ?? 0;
-  const currentPrice = ranking.find(r => r.asset === currentAsset)?.price ?? 0;
-  const unrealisedPct = entryPrice > 0 && currentPrice > 0
-    ? ((currentPrice - entryPrice) / entryPrice) * 100
-    : 0;
-  const unrealisedColor = unrealisedPct >= 0 ? toneColor("good") : toneColor("danger");
+  // Correct unrealised P&L: 1.0004 BTC qty × (currentPrice − entryPrice)
+  const entryPrice              = summary?.entryPrice ?? 0;
+  const currentPrice            = (performance as any)?.currentAssetPrice
+    ?? ranking.find(r => r.asset === currentAsset)?.price ?? 0;
+  const unrealisedPnlUsd        = (performance as any)?.unrealisedPnlUsd ?? 0;
+  const unrealisedPct           = (performance as any)?.unrealisedPnlPct
+    ?? (entryPrice > 0 && currentPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0);
+  const currentPositionValueUsd = (performance as any)?.currentPositionValueUsd ?? portfolioVal;
+  const unrealisedColor         = unrealisedPct >= 0 ? toneColor("good") : toneColor("danger");
+
+  // Previous trade result
+  const lastTrade        = (performance as any)?.lastTrade ?? {};
+  const lastTradeAction  = lastTrade.action ?? "";
+  const lastTradeDate    = lastTrade.date ?? "";
+  const lastTradePos     = lastTrade.position ?? "";
+  const hasLastTrade     = !!lastTradeAction;
 
   // Daily close: use the most recent history record's btc_price (recorded at script run time)
   const lastDailyClose = useMemo(() => {
@@ -255,15 +264,27 @@ export default function Portfolio() {
           <>
             {/* ── Top stat cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Active Portfolio" value={formatLargeNumber(portfolioVal)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} icon={<DollarSign size={14} />} />
+              <StatCard label="Active Portfolio" value={formatLargeNumber(currentPositionValueUsd)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} icon={<DollarSign size={14} />} />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" icon={<ArrowUpRight size={14} />} />
               <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
-              <StatCard label="Unrealised P&L" value={`${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}%`} sub={`Entry ${formatUsd(entryPrice)}`} color={unrealisedColor} icon={<BarChart2 size={14} />} />
+              <StatCard
+                label="Unrealised P&L"
+                value={`${unrealisedPnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(unrealisedPnlUsd))}`}
+                sub={`${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}% · Entry ${formatUsd(entryPrice)} · 1.0004 BTC`}
+                color={unrealisedColor}
+                icon={<BarChart2 size={14} />}
+              />
               <StatCard label="Last Daily Close" value={lastDailyClose != null ? formatUsd(lastDailyClose) : "—"} sub={lastDailyCloseDate ? `Recorded ${lastDailyCloseDate} at script run` : "Awaiting first run"} color="oklch(0.60 0.22 255)" icon={<Clock size={14} />} />
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Current Position" value={currentAsset} sub={summary.entryDate ? `Entered ${summary.entryDate} · ${summary.holdDays ?? 0}d held` : "Awaiting position"} color={assetColor} icon={<Activity size={14} />} />
-              <StatCard label="Total P&L" value={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)}`} sub={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}% active portfolio only`} color={pnlColor} icon={<ArrowUpRight size={14} />} />
+              <StatCard
+                label="Last Trade Signal"
+                value={hasLastTrade ? lastTradeAction.replace(/_/g, " ") : "None yet"}
+                sub={hasLastTrade ? `${lastTradeDate} · was in ${lastTradePos}` : "No completed trades"}
+                color={hasLastTrade ? toneColor("neutral") : toneColor("warn")}
+                icon={<ArrowUpRight size={14} />}
+              />
               <div className="panel p-4 flex flex-col gap-1" style={{ borderColor: `${toneColor(regimeTone as any)}25` }}>
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs text-muted-foreground">BTC Regime</p>

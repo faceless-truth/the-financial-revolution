@@ -187,8 +187,18 @@ export default function Home() {
   const totalWealthUsd = (status as any)?.totalWealthUsd ?? portfolioVal + reserveUsd;
   const totalWealthReturnPct = (status as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 67428) / 67428 * 100);
   const fixedCap      = status?.fixedCapitalUsd ?? 67428;
-  const pnlUsd        = portfolioVal - fixedCap;
-  const pnlPct        = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
+
+  // Correct unrealised P&L from server: 1.0004 BTC × (currentPrice − entryPrice)
+  const perf                    = ls?.performance as any;
+  const unrealisedPnlUsd        = perf?.unrealisedPnlUsd ?? 0;
+  const unrealisedPnlPct        = perf?.unrealisedPnlPct ?? 0;
+  const currentPositionValueUsd = perf?.currentPositionValueUsd ?? portfolioVal;
+  const entryPriceHome          = status?.entryPrice ?? 0;
+  const lastTrade               = perf?.lastTrade ?? {};
+  const hasLastTrade            = !!lastTrade.action;
+
+  const pnlUsd        = unrealisedPnlUsd;
+  const pnlPct        = unrealisedPnlPct;
   const pnlColor      = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
   const regimeConf    = (status as any)?.regimeConf ?? 0;
   const regimeLabel   = (status as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
@@ -251,7 +261,12 @@ export default function Home() {
             {/* ── Top stat cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Current Position" value={currentPos} sub={status.entryDate ? `Entered ${status.entryDate}` : "Awaiting position"} color={assetColor} />
-              <StatCard label="Active Portfolio" value={formatLargeNumber(portfolioVal)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} />
+              <StatCard
+                label="Active Portfolio"
+                value={formatLargeNumber(currentPositionValueUsd)}
+                sub={`${pnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(pnlUsd))} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%) vs entry`}
+                color={pnlColor}
+              />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" />
               <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthReturnPct >= 0 ? "+" : ""}${totalWealthReturnPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" />
             </div>

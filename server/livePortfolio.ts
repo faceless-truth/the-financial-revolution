@@ -248,6 +248,36 @@ export async function getLivePortfolioData() {
   const totalReturnPct    = (pnlUsd / fixedCapital) * 100;
   const totalWealthReturnPct = ((totalWealthUsd - fixedCapital) / fixedCapital) * 100;
   const regimeConf        = toNumber(state?.market_data?.BTC?.regime_conf, 0);
+
+  // ── BTC quantity-based unrealised P&L ────────────────────────────────────
+  // User holds 1.0004 BTC. Unrealised P&L = qty × (currentPrice − entryPrice)
+  const BTC_QUANTITY      = 1.0004;
+  const mktDataForPnl     = state?.market_data ?? {};
+  const currentAssetPrice = currentPosition !== "CASH"
+    ? toNumber(mktDataForPnl?.[currentPosition]?.price, 0)
+    : 0;
+  const unrealisedPnlUsd  = currentPosition !== "CASH" && entryPrice > 0 && currentAssetPrice > 0
+    ? BTC_QUANTITY * (currentAssetPrice - entryPrice)
+    : 0;
+  const unrealisedPnlPct  = entryPrice > 0
+    ? ((currentAssetPrice - entryPrice) / entryPrice) * 100
+    : 0;
+  const currentPositionValueUsd = currentPosition !== "CASH" && currentAssetPrice > 0
+    ? BTC_QUANTITY * currentAssetPrice
+    : portfolioValue;
+
+  // ── Last completed trade result from history ──────────────────────────────
+  // Find the most recent trade that was an entry (not a hold), then look for
+  // the subsequent exit to compute the realised P&L of the previous trade.
+  const sortedHistory = Array.isArray(history) ? [...history] : [];
+  // History is stored oldest-first; find the last ENTRY before the current one
+  const exitActions = ["CRASH_EXIT", "STOP_CASH", "STOP_TO_BTC", "ROTATE", "WYCKOFF_DIST_EXIT_TO_CASH", "WYCKOFF_DIST_EXIT_TO_BTC"];
+  const lastExitRecord = sortedHistory.filter(r => exitActions.includes(asString(r.action, ""))).slice(-1)[0] ?? null;
+  const prevTradeAction   = lastExitRecord ? asString(lastExitRecord.action, "") : "";
+  const prevTradeDate     = lastExitRecord ? asString(lastExitRecord.date, "") : "";
+  const prevTradePosition = lastExitRecord ? asString(lastExitRecord.position, "") : "";
+  // Estimate previous trade P&L from portfolio value delta around the exit
+  const prevTradePortfolioValue = lastExitRecord ? toNumber(lastExitRecord.portfolio_value, 0) : 0;
   const regimeLabel       = regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending";
   const regimeTone        = regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good";
 
@@ -304,8 +334,19 @@ export async function getLivePortfolioData() {
       btcHoldValueUsd:     0,  // populated by script if tracking BTC benchmark
       outperformanceUsd:   0,
       outperformancePct:   0,
-      unrealisedPnlUsd:    pnlUsd,
-      unrealisedPnlPct:    totalReturnPct,
+      // Correct unrealised P&L: based on 1.0004 BTC qty × (currentPrice − entryPrice)
+      unrealisedPnlUsd,
+      unrealisedPnlPct,
+      currentPositionValueUsd,
+      btcQuantity:         BTC_QUANTITY,
+      currentAssetPrice,
+      // Previous completed trade
+      lastTrade: {
+        action:         prevTradeAction,
+        date:           prevTradeDate,
+        position:       prevTradePosition,
+        portfolioValue: prevTradePortfolioValue,
+      },
       counters: {
         rotations,
         crashExits,
