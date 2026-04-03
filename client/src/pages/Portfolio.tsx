@@ -319,9 +319,29 @@ type LivePortfolioSnapshot = {
   tradeHistory?: Array<Record<string, unknown>>;
 };
 
+type TradeAlert = {
+  asset: string;
+  signal: string;
+  price: number;
+  atr: number | null;
+  buyTrigger: number | null;
+  buyTriggerPct: number | null;
+  sellTrigger: number | null;
+  sellTriggerPct: number | null;
+  stopLossEst: number | null;
+  stopPctEst: number | null;
+  actualEntry: number | null;
+  actualStop: number | null;
+  actualStopPct: number | null;
+  alertActive: boolean;
+  color: string;
+  icon: string;
+};
+
 type MsbSnapshot = {
   lastUpdate: string;
   signals: MsbAssetSignal[];
+  tradeAlerts: TradeAlert[];
   available: boolean;
 };
 
@@ -369,7 +389,8 @@ export default function Portfolio() {
   const cashRisk    = data?.cashRisk;
   const ranking     = data?.ranking ?? [];
   const history     = useMemo(() => (Array.isArray(data?.tradeHistory) ? data!.tradeHistory! : []), [data]);
-  const msbSignals  = msb?.signals ?? [];
+  const msbSignals    = msb?.signals ?? [];
+  const tradeAlerts   = msb?.tradeAlerts ?? [];
 
   const currentAsset = summary?.currentAsset ?? "CASH";
   const assetColor   = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
@@ -564,6 +585,113 @@ export default function Portfolio() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════════════════════════
+                MSB TRADE ALERT PANEL
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="panel p-5" style={{ borderColor: "oklch(0.78 0.18 75 / 25%)" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Zap size={16} style={{ color: "oklch(0.78 0.18 75)" }} />
+                <div>
+                  <h2 className="text-sm font-bold tracking-wide text-white" style={{ fontFamily: "Syne, sans-serif" }}>MSB Trade Alerts</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Entry · Stop Loss · Sell Trigger — updated each daily close</p>
+                </div>
+              </div>
+
+              {tradeAlerts.length === 0 ? (
+                <div className="text-sm text-muted-foreground p-4 text-center">
+                  Trade alerts not yet available. They will appear after the first v3.0 script run.
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {tradeAlerts.map((t: TradeAlert) => {
+                    const isActive   = t.alertActive;
+                    const isBullish  = t.signal === "BULLISH_BREAK";
+                    const isBearish  = t.signal === "BEARISH_BREAK";
+                    const borderCol  = isActive
+                      ? (isBullish ? "oklch(0.72 0.18 155 / 40%)" : "oklch(0.62 0.22 25 / 40%)")
+                      : "oklch(0.30 0.010 260 / 60%)";
+                    const sigColor   = isActive
+                      ? (isBullish ? toneColor("good") : toneColor("danger"))
+                      : "oklch(0.50 0.010 260)";
+                    const sigLabel   = isBullish ? "BULLISH BREAK" : isBearish ? "BEARISH BREAK" : "RANGING";
+
+                    // Use actual entry/stop if in position, otherwise estimated
+                    const entryShow  = t.actualEntry ?? t.buyTrigger;
+                    const stopShow   = t.actualStop  ?? t.stopLossEst;
+                    const stopPct    = t.actualStopPct ?? t.stopPctEst;
+
+                    return (
+                      <div key={t.asset} className="rounded-xl p-4 flex flex-col gap-3"
+                        style={{ background: isActive ? `${sigColor}08` : "oklch(0.13 0.010 260)", border: `1px solid ${borderCol}` }}>
+
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-bold" style={{ color: t.color }}>{t.icon} {t.asset}</span>
+                            <span className="text-xs font-mono" style={{ color: "oklch(0.55 0.010 260)" }}>{formatUsd(t.price)}</span>
+                          </div>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                            style={{ background: `${sigColor}18`, color: sigColor, border: `1px solid ${sigColor}35` }}>
+                            {sigLabel}
+                          </span>
+                        </div>
+
+                        {/* Trade levels */}
+                        <div className="grid grid-cols-3 gap-2">
+                          {/* BUY / Entry */}
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: "oklch(0.72 0.18 155 / 8%)", border: "1px solid oklch(0.72 0.18 155 / 20%)" }}>
+                            <p className="text-xs text-muted-foreground mb-1">{t.actualEntry ? "ENTRY" : "BUY AT"}</p>
+                            <p className="text-sm font-bold mono-data" style={{ color: toneColor("good") }}>
+                              {entryShow ? formatUsd(entryShow) : "—"}
+                            </p>
+                            {t.buyTriggerPct != null && !t.actualEntry && (
+                              <p className="text-xs mt-0.5" style={{ color: "oklch(0.55 0.010 260)" }}>+{t.buyTriggerPct.toFixed(1)}% away</p>
+                            )}
+                            {t.actualEntry && (
+                              <p className="text-xs mt-0.5" style={{ color: "oklch(0.55 0.010 260)" }}>In position</p>
+                            )}
+                          </div>
+
+                          {/* STOP LOSS */}
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: "oklch(0.78 0.18 75 / 8%)", border: "1px solid oklch(0.78 0.18 75 / 20%)" }}>
+                            <p className="text-xs text-muted-foreground mb-1">STOP</p>
+                            <p className="text-sm font-bold mono-data" style={{ color: toneColor("warn") }}>
+                              {stopShow ? formatUsd(stopShow) : "—"}
+                            </p>
+                            {stopPct != null && (
+                              <p className="text-xs mt-0.5" style={{ color: "oklch(0.55 0.010 260)" }}>-{stopPct.toFixed(1)}%</p>
+                            )}
+                          </div>
+
+                          {/* SELL TRIGGER */}
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: "oklch(0.62 0.22 25 / 8%)", border: "1px solid oklch(0.62 0.22 25 / 20%)" }}>
+                            <p className="text-xs text-muted-foreground mb-1">SELL AT</p>
+                            <p className="text-sm font-bold mono-data" style={{ color: toneColor("danger") }}>
+                              {t.sellTrigger ? formatUsd(t.sellTrigger) : "—"}
+                            </p>
+                            {t.sellTriggerPct != null && (
+                              <p className="text-xs mt-0.5" style={{ color: "oklch(0.55 0.010 260)" }}>-{t.sellTriggerPct.toFixed(1)}% from now</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ATR info */}
+                        {t.atr != null && (
+                          <p className="text-xs text-muted-foreground">
+                            ATR: <span className="text-foreground font-mono">{formatUsd(t.atr)}</span>
+                            <span className="mx-2 opacity-40">·</span>
+                            Stop = Entry − 1.5×ATR
+                            <span className="mx-2 opacity-40">·</span>
+                            Sell = close below pivot low − ATR
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* ══════════════════════════════════════════════════════════════════

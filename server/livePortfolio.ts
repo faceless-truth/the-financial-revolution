@@ -429,9 +429,35 @@ export async function getMsbSignals() {
     icon:            ASSET_ICONS[asset]  ?? asset[0],
   }));
 
+  // Also expose trade_alerts for the Trade Alert panel
+  const rawAlerts = raw?.trade_alerts ?? {};
+  const tradeAlerts = Object.entries(rawAlerts).map(([asset, d]: [string, any]) => ({
+    asset,
+    signal:           asString(d?.signal, "RANGING"),
+    price:            toNumber(d?.price, 0),
+    atr:              d?.atr != null ? toNumber(d.atr, 0) : null,
+    // BUY trigger
+    buyTrigger:       d?.buy_trigger       != null ? toNumber(d.buy_trigger, 0)       : null,
+    buyTriggerPct:    d?.buy_trigger_pct   != null ? toNumber(d.buy_trigger_pct, 0)   : null,
+    // SELL trigger
+    sellTrigger:      d?.sell_trigger      != null ? toNumber(d.sell_trigger, 0)      : null,
+    sellTriggerPct:   d?.sell_trigger_pct  != null ? toNumber(d.sell_trigger_pct, 0)  : null,
+    // Stop loss estimate (for new entries)
+    stopLossEst:      d?.stop_loss_est     != null ? toNumber(d.stop_loss_est, 0)     : null,
+    stopPctEst:       d?.stop_pct_est      != null ? toNumber(d.stop_pct_est, 0)      : null,
+    // Actual entry/stop if currently in position
+    actualEntry:      d?.actual_entry      != null ? toNumber(d.actual_entry, 0)      : null,
+    actualStop:       d?.actual_stop       != null ? toNumber(d.actual_stop, 0)       : null,
+    actualStopPct:    d?.actual_stop_pct   != null ? toNumber(d.actual_stop_pct, 0)   : null,
+    alertActive:      Boolean(d?.alert_active),
+    color:            ASSET_COLORS[asset] ?? "oklch(0.60 0.22 255)",
+    icon:             ASSET_ICONS[asset]  ?? asset[0],
+  }));
+
   return {
     lastUpdate,
     signals,
+    tradeAlerts,
     available: signals.length > 0,
   };
 }

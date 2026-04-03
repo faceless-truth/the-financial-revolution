@@ -391,10 +391,57 @@ def save_history(history: list):
     with open(HISTORY_FILE, 'w') as f:
         json.dump(history, f, indent=2)
 
-def save_msb_signals(signals: dict):
+def save_msb_signals(signals: dict, state: dict = None):
+    """
+    Writes msb_signals.json with:
+      - per-asset MSB structural data (for the MSB panel)
+      - trade_alerts: per-asset entry/stop/sell trigger (for the Trade Alert panel)
+    """
+    trade_alerts = {}
+    for asset, sig in signals.items():
+        price          = sig.get('price', 0)
+        atr            = sig.get('atr', 0)
+        signal         = sig.get('signal', 'RANGING')
+        breakout_level = sig.get('breakout_level')   # BUY trigger
+        breakdown_level= sig.get('breakdown_level')  # SELL trigger
+
+        # Stop loss = entry - 1.5×ATR (entry = breakout_level when signal fires)
+        entry_est      = breakout_level if breakout_level else price
+        stop_loss_est  = round(entry_est - 1.5 * atr, 2) if atr else None
+        stop_pct       = round((entry_est - stop_loss_est) / entry_est * 100, 2) if stop_loss_est and entry_est else None
+
+        # If we're currently in this asset (from state), use actual entry price
+        actual_entry   = None
+        actual_stop    = None
+        if state and state.get('current_position') == asset and state.get('entry_price', 0) > 0:
+            actual_entry = state['entry_price']
+            actual_stop  = round(actual_entry - 1.5 * atr, 2) if atr else None
+
+        trade_alerts[asset] = {
+            'signal':          signal,
+            'price':           price,
+            'atr':             round(atr, 2) if atr else None,
+            # BUY trigger — the breakout level price must close above
+            'buy_trigger':     round(breakout_level, 2) if breakout_level else None,
+            'buy_trigger_pct': round((breakout_level - price) / price * 100, 2) if breakout_level and price else None,
+            # SELL trigger — the breakdown level price must close below
+            'sell_trigger':    round(breakdown_level, 2) if breakdown_level else None,
+            'sell_trigger_pct':round((price - breakdown_level) / price * 100, 2) if breakdown_level and price else None,
+            # Stop loss for a new entry at breakout level
+            'stop_loss_est':   stop_loss_est,
+            'stop_pct_est':    stop_pct,
+            # Actual entry/stop if currently in position
+            'actual_entry':    actual_entry,
+            'actual_stop':     actual_stop,
+            'actual_stop_pct': round((actual_entry - actual_stop) / actual_entry * 100, 2) if actual_entry and actual_stop else None,
+            # Is signal active right now?
+            'alert_active':    signal in ('BULLISH_BREAK', 'BEARISH_BREAK'),
+        }
+
     payload = {
         "last_update": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "assets": signals
+        "assets":       signals,
+        "trade_alerts": trade_alerts,
     }
     with open(MSB_FILE, 'w') as f:
         json.dump(payload, f, indent=2)
@@ -436,8 +483,10 @@ def run_strategy():
         else:
             logger.info(f"{asset}: Price=${inds['price']:.2f} | Score={inds['score']:.2f} | 30d Mom={inds['mom_30']:.2f}%")
 
-    # Save MSB signals for dashboard
-    save_msb_signals(msb_signals)
+    # Save MSB signals for dashboard (pass state for active position data)
+    # Note: state is loaded after this point, so we pass the raw loaded state here
+    _pre_state = load_state()
+    save_msb_signals(msb_signals, state=_pre_state)
 
     # ── 2. Regime Confidence ──────────────────────────────────────────────────
     btc_df      = asset_dfs['BTC']
