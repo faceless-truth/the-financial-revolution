@@ -61,7 +61,11 @@ function structureColor(structure: string) {
 
 function formatUsd(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  // Auto-detect decimal places: sub-$1 assets (DOGE, SUI) need 4 decimals;
+  // $1–$999 assets need 2 decimals; $1000+ assets need 0 decimals
+  const abs = Math.abs(value);
+  const decimals = abs < 1 ? 4 : abs < 1000 ? 2 : 0;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(value);
 }
 
 function formatUsdPrecise(value: number | null | undefined): string {
@@ -375,9 +379,9 @@ export default function Portfolio() {
   const totalWealthUsd    = (summary as any)?.totalWealthUsd ?? portfolioVal + reserveUsd;
   const totalWealthRetPct = (summary as any)?.totalWealthReturnPct ?? ((totalWealthUsd - 67428) / 67428 * 100);
   const fixedCap          = summary?.fixedCapitalUsd ?? 67428;
-  const pnlUsd            = portfolioVal - fixedCap;
-  const pnlPct            = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
-  const pnlColor          = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
+  // Use currentPositionValueUsd (1.0004 BTC × live price) for P&L — NOT the stale state file value
+  // currentPositionValueUsd is resolved below after performance is read, so we defer pnlUsd
+  const pnlColor          = (v: number) => v >= 0 ? toneColor("good") : toneColor("danger");
   const regimeConf        = (summary as any)?.regimeConf ?? 0;
   const regimeLabel       = (summary as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
   const regimeTone        = (summary as any)?.regimeTone ?? (regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good");
@@ -390,6 +394,10 @@ export default function Portfolio() {
     ?? (entryPrice > 0 && currentPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0);
   const currentPositionValueUsd = (performance as any)?.currentPositionValueUsd ?? portfolioVal;
   const unrealisedColor         = unrealisedPct >= 0 ? toneColor("good") : toneColor("danger");
+
+  // Active portfolio P&L: currentPositionValueUsd vs fixed capital $67,428
+  const pnlUsd = currentPositionValueUsd - fixedCap;
+  const pnlPct = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
 
   const lastTrade        = (performance as any)?.lastTrade ?? {};
   const lastTradeAction  = lastTrade.action ?? "";
@@ -460,7 +468,7 @@ export default function Portfolio() {
           <>
             {/* ── Top stat cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Active Portfolio" value={formatLargeNumber(currentPositionValueUsd)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} icon={<DollarSign size={14} />} />
+              <StatCard label="Active Portfolio" value={formatLargeNumber(currentPositionValueUsd)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor(pnlUsd)} icon={<DollarSign size={14} />} />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" icon={<ArrowUpRight size={14} />} />
               <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $67,428 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
               <StatCard
@@ -607,7 +615,7 @@ export default function Portfolio() {
 
             {/* ── Performance stats ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Total Return (Active)" value={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`} sub={`${pnlUsd >= 0 ? "+" : ""}${formatUsd(pnlUsd)} active portfolio`} color={pnlColor} icon={<TrendingUp size={14} />} />
+              <StatCard label="Total Return (Active)" value={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`} sub={`${pnlUsd >= 0 ? "+" : ""}${formatUsd(pnlUsd)} active portfolio`} color={pnlColor(pnlUsd)} icon={<TrendingUp size={14} />} />
               <StatCard label="Total Return (Wealth)" value={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}%`} sub={`Portfolio + reserve vs ${formatUsd(fixedCap)} start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
               <StatCard label="Total Trades" value={String(performance?.counters?.totalTrades ?? 0)} sub={`${performance?.counters?.rotations ?? 0} rotations · ${performance?.counters?.stopFires ?? 0} stops · ${performance?.counters?.crashExits ?? 0} crashes`} color="oklch(0.60 0.22 255)" icon={<Zap size={14} />} />
               <StatCard label="Cash-Out Events" value={String((performance?.counters as any)?.cashoutFires ?? 0)} sub={`${formatLargeNumber((performance?.counters as any)?.totalCashedOut ?? 0)} total cashed out to reserve`} color="oklch(0.82 0.18 95)" icon={<DollarSign size={14} />} />

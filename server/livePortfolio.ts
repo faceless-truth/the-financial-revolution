@@ -245,8 +245,8 @@ export async function getLivePortfolioData() {
   const action            = asString(state?.action,             "HOLD");
   const reason            = asString(state?.reason,             "");
   const fixedCapital      = 67428;
-  const pnlUsd            = portfolioValue - fixedCapital;
-  const totalReturnPct    = (pnlUsd / fixedCapital) * 100;
+  // NOTE: pnlUsd and totalReturnPct are computed AFTER currentPositionValueUsd below
+  // so we defer them — placeholder values here, overridden after BTC qty calc
   const totalWealthReturnPct = ((totalWealthUsd - fixedCapital) / fixedCapital) * 100;
   const regimeConf        = toNumber(state?.market_data?.BTC?.regime_conf, 0);
 
@@ -271,6 +271,10 @@ export async function getLivePortfolioData() {
   // Starting capital = $67,428 (the fixed capital when BULL_ROTATE started)
   const correctedTotalWealthUsd       = currentPositionValueUsd + reserveUsd;
   const correctedTotalWealthReturnPct = ((correctedTotalWealthUsd - fixedCapital) / fixedCapital) * 100;
+
+  // Active portfolio P&L: based on currentPositionValueUsd (1.0004 BTC × price) vs fixed capital
+  const pnlUsd         = currentPositionValueUsd - fixedCapital;
+  const totalReturnPct = (pnlUsd / fixedCapital) * 100;
 
   // ── Last completed trade result from history ──────────────────────────────
   // Find the most recent trade that was an entry (not a hold), then look for

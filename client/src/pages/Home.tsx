@@ -40,7 +40,11 @@ function toneColor(tone: "good" | "warn" | "danger" | "neutral") {
 
 function formatUsd(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  // Auto-detect decimal places: sub-$1 assets (DOGE, SUI) need 4 decimals;
+  // $1–$999 assets need 2 decimals; $1000+ assets need 0 decimals
+  const abs = Math.abs(value);
+  const decimals = abs < 1 ? 4 : abs < 1000 ? 2 : 0;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(value);
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -197,8 +201,9 @@ export default function Home() {
   const lastTrade               = perf?.lastTrade ?? {};
   const hasLastTrade            = !!lastTrade.action;
 
-  const pnlUsd        = unrealisedPnlUsd;
-  const pnlPct        = unrealisedPnlPct;
+  // Active P&L = currentPositionValueUsd vs fixed capital $67,428
+  const pnlUsd        = currentPositionValueUsd - fixedCap;
+  const pnlPct        = fixedCap > 0 ? (pnlUsd / fixedCap) * 100 : 0;
   const pnlColor      = pnlUsd >= 0 ? toneColor("good") : toneColor("danger");
   const regimeConf    = (status as any)?.regimeConf ?? 0;
   const regimeLabel   = (status as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
@@ -223,7 +228,7 @@ export default function Home() {
               <TrendingUp size={18} style={{ color: "oklch(0.78 0.18 75)" }} />
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>BULL_ROTATE v2.0</h1>
+              <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>BULL_ROTATE v3.0</h1>
               <p className="text-xs text-muted-foreground">BTC · ETH · SOL · DOGE · SUI · 30pp threshold · -15% stop · Regime Gate 65% · 10% cash-out</p>
             </div>
           </div>
@@ -264,7 +269,7 @@ export default function Home() {
               <StatCard
                 label="Active Portfolio"
                 value={formatLargeNumber(currentPositionValueUsd)}
-                sub={`${pnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(pnlUsd))} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%) vs entry`}
+                sub={`${pnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(pnlUsd))} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%) vs $67,428 start`}
                 color={pnlColor}
               />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" />
