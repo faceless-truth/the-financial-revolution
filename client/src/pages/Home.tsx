@@ -268,7 +268,7 @@ export default function Home() {
                 color={pnlColor}
               />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" />
-              <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthReturnPct >= 0 ? "+" : ""}${totalWealthReturnPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" />
+              <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthReturnPct >= 0 ? "+" : ""}${totalWealthReturnPct.toFixed(2)}% vs $67,428 start`} color="oklch(0.72 0.18 155)" />
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Last Signal" value={status.signalAction ?? "HOLD"} sub={status.ruleReason ?? "—"} color="oklch(0.72 0.18 155)" />

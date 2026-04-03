@@ -266,6 +266,11 @@ export async function getLivePortfolioData() {
     ? BTC_QUANTITY * currentAssetPrice
     : portfolioValue;
 
+  // Total Wealth = currentPositionValueUsd + reserveUsd
+  // Starting capital = $67,428 (the fixed capital when BULL_ROTATE started)
+  const correctedTotalWealthUsd       = currentPositionValueUsd + reserveUsd;
+  const correctedTotalWealthReturnPct = ((correctedTotalWealthUsd - fixedCapital) / fixedCapital) * 100;
+
   // ── Last completed trade result from history ──────────────────────────────
   // Find the most recent trade that was an entry (not a hold), then look for
   // the subsequent exit to compute the realised P&L of the previous trade.
@@ -312,8 +317,8 @@ export async function getLivePortfolioData() {
       displayedPortfolioValueUsd: portfolioValue,
       liveStrategyValueUsd:       portfolioValue,
       reserveUsd,
-      totalWealthUsd,
-      totalWealthReturnPct,
+      totalWealthUsd:             correctedTotalWealthUsd,
+      totalWealthReturnPct:       correctedTotalWealthReturnPct,
       pnlUsd,
       totalReturnPct,
       currentAsset:               currentPosition,

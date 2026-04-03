@@ -266,7 +266,7 @@ export default function Portfolio() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Active Portfolio" value={formatLargeNumber(currentPositionValueUsd)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor} icon={<DollarSign size={14} />} />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" icon={<ArrowUpRight size={14} />} />
-              <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $10,000 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
+              <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $67,428 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
               <StatCard
                 label="Unrealised P&L"
                 value={`${unrealisedPnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(unrealisedPnlUsd))}`}
