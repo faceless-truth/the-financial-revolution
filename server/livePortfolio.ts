@@ -23,6 +23,7 @@ import path from "path";
 const DASHBOARD_ROOT = process.env.CRYPTO_DASHBOARD_ROOT ?? "/root/crypto_dashboard";
 const STATE_FILE     = process.env.BULL_ROTATE_STATE_FILE   ?? path.join(DASHBOARD_ROOT, "bull_rotate_state.json");
 const HISTORY_FILE   = process.env.BULL_ROTATE_HISTORY_FILE ?? path.join(DASHBOARD_ROOT, "bull_rotate_history.json");
+const MSB_FILE       = process.env.BULL_ROTATE_MSB_FILE     ?? path.join(DASHBOARD_ROOT, "msb_signals.json");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -388,6 +389,46 @@ export async function getLivePortfolioData() {
     ranking,
     tradeHistory: Array.isArray(history) ? [...history].reverse().slice(0, 50) : [],
     raw: { state, marketData: mktData },
+  };
+}
+
+// ── MSB Signals export ───────────────────────────────────────────────────────
+
+export async function getMsbSignals() {
+  const raw = await readJson<any>(MSB_FILE, {});
+  const lastUpdate = asString(raw?.last_update, "");
+  const assets = raw?.assets ?? {};
+
+  // Normalise each asset's MSB data into a clean typed shape
+  const signals = Object.entries(assets).map(([asset, data]: [string, any]) => ({
+    asset,
+    currentPrice:    toNumber(data?.current_price, 0),
+    atr:             toNumber(data?.atr, 0),
+    signal:          asString(data?.signal, "UNKNOWN"),
+    signalLabel:     asString(data?.signal_label, ""),
+    signalTone:      asString(data?.signal_tone, "neutral"),
+    structure:       asString(data?.structure, "NEUTRAL"),
+    structureLabel:  asString(data?.structure_label, ""),
+    bullishMsb:      Boolean(data?.bullish_msb),
+    bearishMsb:      Boolean(data?.bearish_msb),
+    lastPivotHigh:   data?.last_pivot_high ?? null,
+    lastPivotLow:    data?.last_pivot_low  ?? null,
+    breakoutLevel:   data?.breakout_level  != null ? toNumber(data.breakout_level, 0) : null,
+    breakdownLevel:  data?.breakdown_level != null ? toNumber(data.breakdown_level, 0) : null,
+    distToPhPct:     data?.dist_to_ph_pct  != null ? toNumber(data.dist_to_ph_pct, 0)  : null,
+    distToPlPct:     data?.dist_to_pl_pct  != null ? toNumber(data.dist_to_pl_pct, 0)  : null,
+    phTrend:         asString(data?.ph_trend, "unknown"),
+    plTrend:         asString(data?.pl_trend, "unknown"),
+    recentPivotHighs: Array.isArray(data?.recent_pivot_highs) ? data.recent_pivot_highs : [],
+    recentPivotLows:  Array.isArray(data?.recent_pivot_lows)  ? data.recent_pivot_lows  : [],
+    color:           ASSET_COLORS[asset] ?? "oklch(0.60 0.22 255)",
+    icon:            ASSET_ICONS[asset]  ?? asset[0],
+  }));
+
+  return {
+    lastUpdate,
+    signals,
+    available: signals.length > 0,
   };
 }
 

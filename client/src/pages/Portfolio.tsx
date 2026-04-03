@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { formatLargeNumber, formatPct, timeAgo } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
@@ -11,6 +11,10 @@ import {
   Shield,
   BarChart2,
   Zap,
+  Layers,
+  ArrowUp,
+  ArrowDown,
+  Minus,
 } from "lucide-react";
 
 // ── Asset palette ─────────────────────────────────────────────────────────────
@@ -37,9 +41,32 @@ function toneColor(tone: "good" | "warn" | "danger" | "neutral") {
   }
 }
 
+function msbToneColor(tone: string) {
+  switch (tone) {
+    case "bullish": return "oklch(0.72 0.18 155)";
+    case "bearish": return "oklch(0.62 0.22 25)";
+    default:        return "oklch(0.60 0.22 255)";
+  }
+}
+
+function structureColor(structure: string) {
+  switch (structure) {
+    case "UPTREND":     return "oklch(0.72 0.18 155)";
+    case "DOWNTREND":   return "oklch(0.62 0.22 25)";
+    case "CONTRACTING": return "oklch(0.78 0.18 75)";
+    case "EXPANDING":   return "oklch(0.82 0.18 95)";
+    default:            return "oklch(0.60 0.22 255)";
+  }
+}
+
 function formatUsd(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatUsdPrecise(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -62,6 +89,161 @@ function SectionTitle({ icon, children }: { icon?: React.ReactNode; children: Re
     <div className="flex items-center gap-2 mb-4">
       {icon}
       <h2 className="text-xs font-semibold tracking-widest uppercase text-muted-foreground" style={{ fontFamily: "Geist, sans-serif" }}>{children}</h2>
+    </div>
+  );
+}
+
+// ── MSB Signal Card ───────────────────────────────────────────────────────────
+
+type MsbAssetSignal = {
+  asset: string;
+  currentPrice: number;
+  atr: number;
+  signal: string;
+  signalLabel: string;
+  signalTone: string;
+  structure: string;
+  structureLabel: string;
+  bullishMsb: boolean;
+  bearishMsb: boolean;
+  lastPivotHigh: { date: string; price: number } | null;
+  lastPivotLow:  { date: string; price: number } | null;
+  breakoutLevel:  number | null;
+  breakdownLevel: number | null;
+  distToPhPct: number | null;
+  distToPlPct: number | null;
+  phTrend: string;
+  plTrend: string;
+  recentPivotHighs: Array<{ date: string; price: number }>;
+  recentPivotLows:  Array<{ date: string; price: number }>;
+  color: string;
+  icon: string;
+};
+
+function MsbAssetCard({ s }: { s: MsbAssetSignal }) {
+  const sigColor = msbToneColor(s.signalTone);
+  const strColor = structureColor(s.structure);
+
+  const SignalIcon = s.bullishMsb
+    ? <ArrowUp size={14} style={{ color: sigColor }} />
+    : s.bearishMsb
+    ? <ArrowDown size={14} style={{ color: sigColor }} />
+    : <Minus size={14} style={{ color: sigColor }} />;
+
+  return (
+    <div className="panel p-4 flex flex-col gap-3" style={{ borderColor: `${sigColor}30`, background: `${sigColor}05` }}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-bold" style={{ color: s.color, fontFamily: "Syne, sans-serif" }}>
+            {s.icon} {s.asset}
+          </span>
+          <span className="text-xs mono-data text-muted-foreground">{formatUsd(s.currentPrice)}</span>
+        </div>
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: `${sigColor}15`, border: `1px solid ${sigColor}30` }}>
+          {SignalIcon}
+          <span className="text-xs font-bold" style={{ color: sigColor }}>{s.signal.replace(/_/g, " ")}</span>
+        </div>
+      </div>
+
+      {/* Signal description */}
+      <p className="text-xs text-muted-foreground leading-relaxed">{s.signalLabel}</p>
+
+      {/* Structure */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Structure:</span>
+        <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: `${strColor}15`, color: strColor }}>
+          {s.structure}
+        </span>
+        <span className="text-xs text-muted-foreground">{s.structureLabel}</span>
+      </div>
+
+      {/* Key levels grid */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-lg p-2.5" style={{ background: "oklch(0.72 0.18 155 / 8%)", border: "1px solid oklch(0.72 0.18 155 / 15%)" }}>
+          <p className="text-muted-foreground mb-1">Pivot High</p>
+          <p className="font-bold mono-data" style={{ color: "oklch(0.72 0.18 155)" }}>
+            {s.lastPivotHigh ? formatUsd(s.lastPivotHigh.price) : "—"}
+          </p>
+          {s.lastPivotHigh && <p className="text-muted-foreground/60">{s.lastPivotHigh.date}</p>}
+          {s.distToPhPct != null && (
+            <p className="text-muted-foreground/60 mt-0.5">
+              {s.distToPhPct > 0 ? `${s.distToPhPct.toFixed(1)}% below` : `${Math.abs(s.distToPhPct).toFixed(1)}% above`}
+            </p>
+          )}
+        </div>
+        <div className="rounded-lg p-2.5" style={{ background: "oklch(0.62 0.22 25 / 8%)", border: "1px solid oklch(0.62 0.22 25 / 15%)" }}>
+          <p className="text-muted-foreground mb-1">Pivot Low</p>
+          <p className="font-bold mono-data" style={{ color: "oklch(0.62 0.22 25)" }}>
+            {s.lastPivotLow ? formatUsd(s.lastPivotLow.price) : "—"}
+          </p>
+          {s.lastPivotLow && <p className="text-muted-foreground/60">{s.lastPivotLow.date}</p>}
+          {s.distToPlPct != null && (
+            <p className="text-muted-foreground/60 mt-0.5">
+              {s.distToPlPct > 0 ? `${s.distToPlPct.toFixed(1)}% above` : `${Math.abs(s.distToPlPct).toFixed(1)}% below`}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Breakout / Breakdown levels */}
+      {(s.breakoutLevel || s.breakdownLevel) && (
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {s.breakoutLevel && (
+            <div className="flex items-center justify-between rounded px-2 py-1.5" style={{ background: "oklch(0.72 0.18 155 / 6%)" }}>
+              <span className="text-muted-foreground">Breakout at</span>
+              <span className="font-bold mono-data" style={{ color: "oklch(0.72 0.18 155)" }}>{formatUsd(s.breakoutLevel)}</span>
+            </div>
+          )}
+          {s.breakdownLevel && (
+            <div className="flex items-center justify-between rounded px-2 py-1.5" style={{ background: "oklch(0.62 0.22 25 / 6%)" }}>
+              <span className="text-muted-foreground">Breakdown at</span>
+              <span className="font-bold mono-data" style={{ color: "oklch(0.62 0.22 25)" }}>{formatUsd(s.breakdownLevel)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pivot trend arrows */}
+      <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border/20 pt-2">
+        <span>
+          HH/LH:{" "}
+          <span className="font-semibold" style={{ color: s.phTrend === "rising" ? "oklch(0.72 0.18 155)" : "oklch(0.62 0.22 25)" }}>
+            {s.phTrend === "rising" ? "↑ Rising" : s.phTrend === "falling" ? "↓ Falling" : "—"}
+          </span>
+        </span>
+        <span>
+          HL/LL:{" "}
+          <span className="font-semibold" style={{ color: s.plTrend === "rising" ? "oklch(0.72 0.18 155)" : "oklch(0.62 0.22 25)" }}>
+            {s.plTrend === "rising" ? "↑ Rising" : s.plTrend === "falling" ? "↓ Falling" : "—"}
+          </span>
+        </span>
+        <span className="ml-auto text-muted-foreground/50">ATR: {s.atr > 0 ? formatUsdPrecise(s.atr) : "—"}</span>
+      </div>
+
+      {/* Recent pivot levels mini-list */}
+      {(s.recentPivotHighs.length > 0 || s.recentPivotLows.length > 0) && (
+        <div className="grid grid-cols-2 gap-2 text-xs border-t border-border/20 pt-2">
+          <div>
+            <p className="text-muted-foreground/60 mb-1">Recent Highs</p>
+            {s.recentPivotHighs.slice(-3).reverse().map((p, i) => (
+              <div key={i} className="flex justify-between">
+                <span className="text-muted-foreground/50">{p.date}</span>
+                <span className="mono-data" style={{ color: "oklch(0.72 0.18 155)" }}>{formatUsd(p.price)}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <p className="text-muted-foreground/60 mb-1">Recent Lows</p>
+            {s.recentPivotLows.slice(-3).reverse().map((p, i) => (
+              <div key={i} className="flex justify-between">
+                <span className="text-muted-foreground/50">{p.date}</span>
+                <span className="mono-data" style={{ color: "oklch(0.62 0.22 25)" }}>{formatUsd(p.price)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -133,29 +315,46 @@ type LivePortfolioSnapshot = {
   tradeHistory?: Array<Record<string, unknown>>;
 };
 
+type MsbSnapshot = {
+  lastUpdate: string;
+  signals: MsbAssetSignal[];
+  available: boolean;
+};
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Portfolio() {
-  const [data, setData] = useState<LivePortfolioSnapshot | null>(null);
+  const [data, setData]       = useState<LivePortfolioSnapshot | null>(null);
+  const [msb,  setMsb]        = useState<MsbSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadSnapshot() {
+
+    async function loadAll() {
       try {
-        const response = await fetch("/api/live-portfolio", { headers: { Accept: "application/json" } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const json = await response.json();
-        if (!cancelled) setData(json);
+        const [portfolioRes, msbRes] = await Promise.all([
+          fetch("/api/live-portfolio",  { headers: { Accept: "application/json" } }),
+          fetch("/api/msb-signals",     { headers: { Accept: "application/json" } }),
+        ]);
+        if (!portfolioRes.ok) throw new Error(`Portfolio HTTP ${portfolioRes.status}`);
+        const portfolioJson = await portfolioRes.json();
+        if (!cancelled) setData(portfolioJson);
+
+        if (msbRes.ok) {
+          const msbJson = await msbRes.json();
+          if (!cancelled) setMsb(msbJson);
+        }
       } catch (error) {
-        console.error("Failed to load live portfolio", error);
+        console.error("Failed to load portfolio data", error);
         if (!cancelled) setData(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-    loadSnapshot();
-    const interval = setInterval(loadSnapshot, 5 * 60 * 1000);
+
+    loadAll();
+    const interval = setInterval(loadAll, 5 * 60 * 1000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
@@ -166,6 +365,7 @@ export default function Portfolio() {
   const cashRisk    = data?.cashRisk;
   const ranking     = data?.ranking ?? [];
   const history     = useMemo(() => (Array.isArray(data?.tradeHistory) ? data!.tradeHistory! : []), [data]);
+  const msbSignals  = msb?.signals ?? [];
 
   const currentAsset = summary?.currentAsset ?? "CASH";
   const assetColor   = ASSET_COLORS[currentAsset] ?? ASSET_COLORS.CASH;
@@ -182,7 +382,6 @@ export default function Portfolio() {
   const regimeLabel       = (summary as any)?.regimeLabel ?? (regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending");
   const regimeTone        = (summary as any)?.regimeTone ?? (regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good");
 
-  // Correct unrealised P&L: 1.0004 BTC qty × (currentPrice − entryPrice)
   const entryPrice              = summary?.entryPrice ?? 0;
   const currentPrice            = (performance as any)?.currentAssetPrice
     ?? ranking.find(r => r.asset === currentAsset)?.price ?? 0;
@@ -192,17 +391,14 @@ export default function Portfolio() {
   const currentPositionValueUsd = (performance as any)?.currentPositionValueUsd ?? portfolioVal;
   const unrealisedColor         = unrealisedPct >= 0 ? toneColor("good") : toneColor("danger");
 
-  // Previous trade result
   const lastTrade        = (performance as any)?.lastTrade ?? {};
   const lastTradeAction  = lastTrade.action ?? "";
   const lastTradeDate    = lastTrade.date ?? "";
   const lastTradePos     = lastTrade.position ?? "";
   const hasLastTrade     = !!lastTradeAction;
 
-  // Daily close: use the most recent history record's btc_price (recorded at script run time)
   const lastDailyClose = useMemo(() => {
     if (!Array.isArray(data?.tradeHistory) || data!.tradeHistory!.length === 0) return null;
-    // history is already reversed (newest first) from the server
     const btcPriceVal = Number((data!.tradeHistory![0] as any).btc_price ?? 0);
     return btcPriceVal > 0 ? btcPriceVal : null;
   }, [data]);
@@ -230,7 +426,7 @@ export default function Portfolio() {
               </div>
               <div>
                 <h1 className="text-base font-bold tracking-tight text-white" style={{ fontFamily: "Syne, sans-serif" }}>My Portfolio</h1>
-                <p className="text-xs text-muted-foreground">BULL_ROTATE v2.0 · Fixed capital {loading ? "—" : formatUsd(fixedCap)}</p>
+                <p className="text-xs text-muted-foreground">BULL_ROTATE v3.0 · Fixed capital {loading ? "—" : formatUsd(fixedCap)}</p>
               </div>
             </div>
           </div>
@@ -341,6 +537,7 @@ export default function Portfolio() {
                       </div>
                     ))}
                   </div>
+                  <p className="text-xs text-muted-foreground/50 mt-3">Composite = 50% × 30d + 30% × 14d + 20% × 7d momentum. Rotation fires when alt leads BTC by 30pp.</p>
                 </div>
 
                 {/* Rotation readiness */}
@@ -359,6 +556,53 @@ export default function Portfolio() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════════════════════════
+                MSB SIGNAL PANEL — Market Structure Break Analysis
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="panel p-5" style={{ borderColor: "oklch(0.60 0.22 255 / 25%)" }}>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <Layers size={16} style={{ color: "oklch(0.60 0.22 255)" }} />
+                  <div>
+                    <h2 className="text-sm font-bold tracking-wide text-white" style={{ fontFamily: "Syne, sans-serif" }}>MSB Signal Panel</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">Market Structure Break analysis · Pivot highs/lows · Breakout levels</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {msb?.lastUpdate && (
+                    <span className="text-xs text-muted-foreground hidden sm:block">{timeAgo(new Date(msb.lastUpdate))}</span>
+                  )}
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="w-2 h-2 rounded-full" style={{ background: "oklch(0.72 0.18 155)" }} />
+                    <span className="text-muted-foreground">Bullish Break</span>
+                    <span className="w-2 h-2 rounded-full ml-2" style={{ background: "oklch(0.62 0.22 25)" }} />
+                    <span className="text-muted-foreground">Bearish Break</span>
+                    <span className="w-2 h-2 rounded-full ml-2" style={{ background: "oklch(0.60 0.22 255)" }} />
+                    <span className="text-muted-foreground">Ranging</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* MSB explanation */}
+              <div className="rounded-lg p-3 mb-5 text-xs text-muted-foreground" style={{ background: "oklch(0.60 0.22 255 / 6%)", border: "1px solid oklch(0.60 0.22 255 / 15%)" }}>
+                <span className="text-foreground font-semibold">How to read this panel: </span>
+                A <span style={{ color: "oklch(0.72 0.18 155)" }}>Bullish MSB</span> fires when price closes above a confirmed pivot high + ATR buffer — structure has broken upward.
+                A <span style={{ color: "oklch(0.62 0.22 25)" }}>Bearish MSB</span> fires when price closes below a confirmed pivot low − ATR buffer — structure has broken downward.
+                In v3.0, a Bearish MSB on your held asset triggers an immediate exit. A Bullish MSB on BTC/ETH triggers entry from cash.
+                Pivot highs/lows are confirmed using {5} bars on each side.
+              </div>
+
+              {msbSignals.length === 0 ? (
+                <div className="text-sm text-muted-foreground p-4 text-center">
+                  MSB signals not yet available. They will appear after the first v3.0 script run on your droplet.
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {msbSignals.map(s => <MsbAssetCard key={s.asset} s={s} />)}
+                </div>
+              )}
             </div>
 
             {/* ── Performance stats ── */}
@@ -393,7 +637,7 @@ export default function Portfolio() {
               <div className="flex items-center justify-between mb-4 gap-4">
                 <div>
                   <h2 className="text-sm font-bold tracking-wide text-white" style={{ fontFamily: "Syne, sans-serif" }}>Trade History</h2>
-                  <p className="text-xs text-muted-foreground mt-1">All BULL_ROTATE v2.0 signals from the droplet.</p>
+                  <p className="text-xs text-muted-foreground mt-1">All BULL_ROTATE v3.0 signals from the droplet.</p>
                 </div>
                 <p className="text-xs text-muted-foreground mono-data">{history.length} records</p>
               </div>
@@ -410,11 +654,14 @@ export default function Portfolio() {
                   const cashoutAmt = Number((row as any).cashout_amount ?? 0);
                   const regConf    = Number((row as any).regime_conf ?? 0);
                   const btcClose   = Number((row as any).btc_price ?? 0);
-                  const isRotation = act === "ROTATE" || act === "REENTER_BTC";
+                  const msbSig     = String((row as any).msb_signal ?? "");
+                  const msbStr     = String((row as any).msb_structure ?? "");
+                  const isRotation = act === "ROTATE" || act === "REENTER_BTC" || act === "MSB_ENTRY_BTC" || act === "MSB_ENTRY_ETH";
                   const isStop     = act === "STOP_CASH" || act === "STOP_TO_BTC";
                   const isCrash    = act === "CRASH_EXIT";
+                  const isMsbExit  = act === "MSB_EXIT";
                   const isCashout  = cashoutAmt > 0;
-                  const tagColor   = isRotation ? toneColor("good") : isStop ? toneColor("warn") : isCrash ? toneColor("danger") : "oklch(0.55 0.010 260)";
+                  const tagColor   = isRotation ? toneColor("good") : isStop ? toneColor("warn") : isCrash ? toneColor("danger") : isMsbExit ? "oklch(0.62 0.22 25)" : "oklch(0.55 0.010 260)";
                   return (
                     <div key={`hist-${index}`} className="rounded-xl border border-border/20 p-3 bg-card/20">
                       <div className="flex items-center justify-between gap-4 mb-1">
@@ -422,9 +669,14 @@ export default function Portfolio() {
                           <span className="text-xs font-bold mono-data text-muted-foreground">{date}</span>
                           <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: `${posColor}15`, color: posColor }}>{pos}</span>
                           <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: `${tagColor}15`, color: tagColor }}>{act}</span>
+                          {msbSig && msbSig !== "UNKNOWN" && (
+                            <span className="text-xs px-2 py-0.5 rounded" style={{ background: "oklch(0.60 0.22 255 / 12%)", color: "oklch(0.60 0.22 255)" }}>
+                              MSB: {msbSig}
+                            </span>
+                          )}
                           {isCashout && (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "oklch(0.82 0.18 95 / 15%)", color: "oklch(0.82 0.18 95)" }}>
-                              💰 +{formatLargeNumber(cashoutAmt)} to reserve
+                              +{formatLargeNumber(cashoutAmt)} to reserve
                             </span>
                           )}
                           {regConf >= 65 && (

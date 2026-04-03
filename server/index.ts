@@ -2,7 +2,7 @@ import express from "express";
 import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getLivePortfolioData, getLiveDashboardData } from "./livePortfolio";
+import { getLivePortfolioData, getLiveDashboardData, getMsbSignals } from "./livePortfolio";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,18 @@ async function startServer() {
     } catch (error) {
       res.status(500).json({
         error: "Unable to load live portfolio snapshot",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.get("/api/msb-signals", async (_req, res) => {
+    try {
+      const data = await getMsbSignals();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({
+        error: "Unable to load MSB signals",
         details: error instanceof Error ? error.message : String(error),
       });
     }
