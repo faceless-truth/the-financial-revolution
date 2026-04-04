@@ -263,16 +263,19 @@ export async function getLivePortfolioData() {
   const unrealisedPnlPct  = entryPrice > 0
     ? ((currentAssetPrice - entryPrice) / entryPrice) * 100
     : 0;
+  // ── currentPositionValueUsd ────────────────────────────────────────────────
+  // When IN a position: 1.0004 BTC × current asset price
+  // When IN CASH: use the portfolio_value_usd from the state file (cash value at exit)
   const currentPositionValueUsd = currentPosition !== "CASH" && currentAssetPrice > 0
     ? BTC_QUANTITY * currentAssetPrice
-    : portfolioValue;
+    : portfolioValue;   // portfolioValue = cash held after exit
 
   // Total Wealth = currentPositionValueUsd + reserveUsd
   // Starting capital = $67,428 (the fixed capital when BULL_ROTATE started)
   const correctedTotalWealthUsd       = currentPositionValueUsd + reserveUsd;
   const correctedTotalWealthReturnPct = ((correctedTotalWealthUsd - fixedCapital) / fixedCapital) * 100;
 
-  // Active portfolio P&L: based on currentPositionValueUsd (1.0004 BTC × price) vs fixed capital
+  // Active portfolio P&L: based on currentPositionValueUsd vs fixed capital
   const pnlUsd         = currentPositionValueUsd - fixedCapital;
   const totalReturnPct = (pnlUsd / fixedCapital) * 100;
 
@@ -302,13 +305,21 @@ export async function getLivePortfolioData() {
   const signalDescription = describeAction(action, currentPosition, reason);
 
   // Counters from history
+  // totalTrades = all meaningful position changes (entries, exits, rotations)
+  const entryActions = ["REENTER_BTC", "ROTATE", "MSB_ENTRY"];
+  const exitActionsFull = ["CRASH_EXIT", "STOP_CASH", "STOP_TO_BTC", "REGIME_EXIT",
+    "WYCKOFF_DIST_EXIT_TO_CASH", "WYCKOFF_DIST_EXIT_TO_BTC", "MSB_EXIT"];
   const rotations    = history.filter(r => r.action === "ROTATE").length;
   const crashExits   = history.filter(r => r.action === "CRASH_EXIT").length;
   const stopFires    = history.filter(r => r.action === "STOP_CASH" || r.action === "STOP_TO_BTC").length;
+  const regimeExits  = history.filter(r => r.action === "REGIME_EXIT" || r.action === "MSB_EXIT").length;
+  const entries      = history.filter(r => entryActions.includes(asString(r.action, ""))).length;
   const cashDays     = history.filter(r => r.position === "CASH").length;
   const cashoutFires = history.filter(r => (r.cashout_amount ?? 0) > 0).length;
   const totalCashedOut = history.reduce((sum, r) => sum + toNumber(r.cashout_amount, 0), 0);
   const regimeBlocks = history.filter(r => r.action === "HOLD" && (r.reason ?? "").includes("choppy regime")).length;
+  // totalTrades = entries + exits (each round-trip counts as 2 events, but we show entries as the trade count)
+  const totalTrades  = entries + rotations + crashExits + stopFires + regimeExits;
 
   return {
     source: {
@@ -365,7 +376,9 @@ export async function getLivePortfolioData() {
         cashoutFires,
         totalCashedOut,
         regimeBlocks,
-        totalTrades: rotations + crashExits + stopFires,
+        totalTrades,
+        regimeExits,
+        entries,
       },
     },
     preparation: {

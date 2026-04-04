@@ -489,14 +489,32 @@ export default function Portfolio() {
           <>
             {/* ── Top stat cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Active Portfolio" value={formatLargeNumber(currentPositionValueUsd)} sub={`${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`} color={pnlColor(pnlUsd)} icon={<DollarSign size={14} />} />
+              <StatCard
+                label="Active Portfolio"
+                value={formatLargeNumber(currentPositionValueUsd)}
+                sub={
+                  currentAsset === "CASH"
+                    ? `Cash — exited at ${formatUsd(currentPositionValueUsd)}`
+                    : `${pnlUsd >= 0 ? "+" : ""}${formatLargeNumber(pnlUsd)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%) vs $67,428 start`
+                }
+                color={pnlColor(pnlUsd)}
+                icon={<DollarSign size={14} />}
+              />
               <StatCard label="Reserve (Cashed Out)" value={formatLargeNumber(reserveUsd)} sub={reserveUsd > 0 ? "Profit locked in — ready to redeploy" : "No profits cashed out yet"} color="oklch(0.82 0.18 95)" icon={<ArrowUpRight size={14} />} />
               <StatCard label="Total Wealth" value={formatLargeNumber(totalWealthUsd)} sub={`${totalWealthRetPct >= 0 ? "+" : ""}${totalWealthRetPct.toFixed(2)}% vs $67,428 start`} color="oklch(0.72 0.18 155)" icon={<TrendingUp size={14} />} />
               <StatCard
                 label="Unrealised P&L"
-                value={`${unrealisedPnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(unrealisedPnlUsd))}`}
-                sub={`${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}% · Entry ${formatUsd(entryPrice)} · 1.0004 BTC`}
-                color={unrealisedColor}
+                value={
+                  currentAsset === "CASH"
+                    ? "In Cash"
+                    : `${unrealisedPnlUsd >= 0 ? "+" : "-"}${formatUsd(Math.abs(unrealisedPnlUsd))}`
+                }
+                sub={
+                  currentAsset === "CASH"
+                    ? "No active position — awaiting re-entry signal"
+                    : `${unrealisedPct >= 0 ? "+" : ""}${unrealisedPct.toFixed(2)}% · Entry ${formatUsd(entryPrice)} · 1.0004 BTC`
+                }
+                color={currentAsset === "CASH" ? toneColor("neutral") : unrealisedColor}
                 icon={<BarChart2 size={14} />}
               />
               <StatCard label="Last Daily Close" value={lastDailyClose != null ? formatUsd(lastDailyClose) : "—"} sub={lastDailyCloseDate ? `Recorded ${lastDailyCloseDate} at script run` : "Awaiting first run"} color="oklch(0.60 0.22 255)" icon={<Clock size={14} />} />
