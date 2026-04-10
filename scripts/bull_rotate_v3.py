@@ -738,6 +738,7 @@ def run_strategy():
         "regime_conf":     regime_conf,
         "msb_signal":      btc_msb.get('signal', 'UNKNOWN'),
         "msb_structure":   btc_msb.get('structure', 'UNKNOWN'),
+        "entry_price":     new_entry_price if target_pos != "CASH" else 0.0,
     }
     history.append(history_record)
     save_history(history)

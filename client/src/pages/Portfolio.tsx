@@ -552,8 +552,27 @@ export default function Portfolio() {
                     <h2 className="text-xl font-bold" style={{ fontFamily: "Syne, sans-serif", color: assetColor }}>{currentAsset}</h2>
                   </div>
                   <p className="text-sm text-muted-foreground max-w-2xl">{preparation?.note ?? summary.ruleReason}</p>
+                  {/* Stop loss + crash exit badges — only when in a position */}
+                  {currentAsset !== "CASH" && cashRisk?.stopLossLevel != null && cashRisk.stopLossLevel > 0 && (
+                    <div className="flex items-center gap-3 mt-3 flex-wrap">
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: "oklch(0.62 0.22 25 / 12%)", border: "1px solid oklch(0.62 0.22 25 / 35%)" }}>
+                        <Shield size={12} style={{ color: "oklch(0.62 0.22 25)" }} />
+                        <span className="text-xs text-muted-foreground">Stop Loss</span>
+                        <span className="text-sm font-bold mono-data" style={{ color: "oklch(0.62 0.22 25)" }}>{formatUsd(cashRisk.stopLossLevel)}</span>
+                        <span className="text-xs text-muted-foreground/60">−15% from entry</span>
+                      </div>
+                      {cashRisk.crashExitLevel > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: "oklch(0.72 0.18 155 / 8%)", border: "1px solid oklch(0.72 0.18 155 / 25%)" }}>
+                          <Shield size={12} style={{ color: "oklch(0.72 0.18 155)" }} />
+                          <span className="text-xs text-muted-foreground">Crash Exit</span>
+                          <span className="text-sm font-bold mono-data" style={{ color: "oklch(0.72 0.18 155)" }}>{formatUsd(cashRisk.crashExitLevel)}</span>
+                          <span className="text-xs text-muted-foreground/60">−25% BTC 30d DD</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="panel px-4 py-3 min-w-[220px]" style={{ background: "oklch(0.10 0.010 260 / 55%)" }}>
+                <div className="panel px-4 py-3 min-w-[220px]" style={{ background: "oklch(0.10 0.010 260 / 55%)"}}>
                   <p className="text-xs text-muted-foreground mb-1">Last signal</p>
                   <p className="text-lg font-bold" style={{ fontFamily: "Syne, sans-serif", color: assetColor }}>{summary.signalAction ?? "HOLD"}</p>
                   <p className="text-xs text-muted-foreground mt-1">{summary.ruleReason ?? "—"}</p>
@@ -807,8 +826,10 @@ export default function Portfolio() {
                   const posColor = ASSET_COLORS[pos] ?? "white";
                   const cashoutAmt = Number((row as any).cashout_amount ?? 0);
                   const regConf    = Number((row as any).regime_conf ?? 0);
-                  const btcClose   = Number((row as any).btc_price ?? 0);
-                  const msbSig     = String((row as any).msb_signal ?? "");
+                  const btcClose    = Number((row as any).btc_price ?? 0);
+                  const rowEntryPx  = Number((row as any).entry_price ?? 0);
+                  const rowStopLoss = rowEntryPx > 0 ? rowEntryPx * 0.85 : 0;
+                  const msbSig      = String((row as any).msb_signal ?? "");
                   const msbStr     = String((row as any).msb_structure ?? "");
                   const isRotation = act === "ROTATE" || act === "REENTER_BTC" || act === "MSB_ENTRY_BTC" || act === "MSB_ENTRY_ETH";
                   const isStop     = act === "STOP_CASH" || act === "STOP_TO_BTC";
@@ -839,7 +860,10 @@ export default function Portfolio() {
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 text-right">
+                        <div className="flex items-center gap-2 text-right flex-wrap justify-end">
+                          {rowStopLoss > 0 && (
+                            <span className="text-xs mono-data font-semibold px-2 py-0.5 rounded" style={{ background: "oklch(0.62 0.22 25 / 12%)", color: "oklch(0.62 0.22 25)", border: "1px solid oklch(0.62 0.22 25 / 25%)" }}>SL {formatUsd(rowStopLoss)}</span>
+                          )}
                           {btcClose > 0 && (
                             <span className="text-xs mono-data font-semibold" style={{ color: "oklch(0.78 0.18 75)" }}>₿ {formatUsd(btcClose)}</span>
                           )}
