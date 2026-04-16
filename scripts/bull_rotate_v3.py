@@ -11,7 +11,7 @@ ENTRY:
 
 EXIT (upgraded from v2.0):
   - MSB structural exit: exit immediately when price breaks below recent pivot low
-  - Regime exit: BTC 30d momentum turns negative (hold >= 3 days)
+  - Regime exit: BTC 30d momentum falls below -0.2% (hold >= 3 days)
   - Crash exit: BTC 30d drawdown <= -25% (hard backstop)
   - Stop loss: -15% from entry price
 
@@ -60,6 +60,8 @@ MIN_HOLD_DAYS       = 3
 
 REGIME_GATE_CONF    = 65.0
 CASHOUT_RATE        = 0.10
+REGIME_EXIT_THRESHOLD = -0.2   # BTC 30d momentum must fall below this % to trigger REGIME_EXIT
+                               # Backtest (2018-2026): -0.1% → +3745% | -0.2% → +4201% (optimal risk/reward)
 
 # MSB parameters
 MSB_PIVOT_BARS      = 5     # bars each side to confirm pivot high/low
@@ -523,7 +525,7 @@ def run_strategy():
     target_pos   = current_pos
     new_entry_price = entry_price
     cashout_amount  = 0.0
-    bull_regime  = btc_data['mom_30'] > 0
+    bull_regime  = btc_data['mom_30'] > REGIME_EXIT_THRESHOLD
 
     # ── 4. Decision Logic ─────────────────────────────────────────────────────
 
@@ -632,7 +634,7 @@ def run_strategy():
 
     # ── Rule 6: Cash Re-entry with MSB gate (NEW in v3.0) ────────────────────
     elif current_pos == "CASH":
-        if bull_regime:
+        if btc_data['mom_30'] > 0:
             # Start or continue waiting for MSB entry
             if not msb_waiting:
                 msb_waiting   = True
