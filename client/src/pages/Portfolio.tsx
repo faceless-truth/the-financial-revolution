@@ -275,6 +275,38 @@ type LivePortfolioSnapshot = {
     holdDays?: number;
     entryPrice?: number;
     entryDate?: string;
+    // ── v4.1 emitted passthrough (server B-opt-1) — display only ──
+    strategyVersion?: string;
+    reserveUsd?: number;
+    totalWealthUsd?: number;
+    totalWealthReturnPct?: number;
+    btcMom30?: number;
+    msbWaiting?: boolean;
+    msbWaitDays?: number;
+    msbWaitLimit?: number;
+    tfrScores?: Record<string, number>;
+    btcTfr?: number;
+    leaderAsset?: string;
+    leaderScore?: number;
+    leadOverBtc?: number;
+    rotThreshold?: number;
+    minHoldDays?: number;
+    predictedAction?: string;
+    predictedReason?: string;
+    btcBreakoutLevel?: number;
+    ethBreakoutLevel?: number;
+    btcDistancePct?: number;
+    fallbackInDays?: number;
+    regimeLabel?: string;
+    regimeTone?: "good" | "warn" | "danger" | "neutral";
+    triggerConditions?: Array<{ label: string; probability: string }>;
+    // authoritative rule decisions — { active, reason } per rule
+    rulesStatus?: Record<string, { active?: boolean; reason?: string; [k: string]: unknown }>;
+    btcHealth?: Record<string, number | string>;
+    allAssetScores?: Record<string, { score?: number; tfr?: number; mom_30?: number; mom_14?: number; mom_7?: number; price?: number }>;
+    entryStatus?: Record<string, number | string | boolean>;
+    strategyParameters?: Record<string, number | string>;
+    scriptPerformance?: Record<string, number | string>;
   };
   performance?: {
     btcHoldValueUsd?: number;
@@ -319,6 +351,17 @@ type LivePortfolioSnapshot = {
     statusTone?: "good" | "warn" | "danger";
     regimeExitPrice?: number;
     distanceToRegimeExit?: number;
+    // ── B-opt-1 passthrough: thresholds + script-emitted reasons/flags ──
+    crashThreshold?: number;
+    regimeExitThreshold?: number;
+    regimeState?: string;
+    crashReason?: string;
+    stopReason?: string;
+    msbReason?: string;
+    regimeReason?: string;
+    rotateReason?: string;
+    msbActive?: boolean;
+    regimeActive?: boolean;
   };
   ranking?: Array<{ asset: string; score: number; mom30: number; price: number; color: string; icon: string; galaxyScore?: number; altRank?: number; sentiment?: number; prevGalaxyScore?: number; prevAltRank?: number; prevSentiment?: number; trend?: string }>;
   tradeHistory?: Array<Record<string, unknown>>;
@@ -461,6 +504,19 @@ export default function Portfolio() {
   const fallbackInDays    = (summary as any)?.fallbackInDays ?? 0;
   const regimeLabel       = (summary as any)?.regimeLabel ?? (btcMom30 > 0 ? "BULLISH" : btcMom30 < -0.2 ? "BEARISH" : "NEUTRAL");
   const regimeTone        = (summary as any)?.regimeTone ?? (btcMom30 > 0 ? "good" : btcMom30 < -0.2 ? "danger" : "warn");
+  // ── Authoritative emitted decision blocks (display only — the script decides, the UI shows) ──
+  const rulesStatus        = summary?.rulesStatus ?? {};
+  const strategyParameters = summary?.strategyParameters ?? {};
+  const scriptPerformance  = summary?.scriptPerformance ?? {};
+  const entryStatus        = summary?.entryStatus ?? {};
+  // Rule active flags come ONLY from rulesStatus.rule_N (single source of truth);
+  // distances/levels come from cashRisk. NOTE: sourcing one checklist row from two
+  // objects (decision from rulesStatus, distance from cashRisk) is awkward — flagged
+  // for a future server-side consolidation pass, NOT resolved via the cashRisk mirror.
+  const rule = (n: string): { active: boolean; reason: string } => {
+    const r = (rulesStatus as Record<string, { active?: boolean; reason?: string }>)?.[n] ?? {};
+    return { active: r.active === true, reason: r.reason ?? "" };
+  };
 
   const entryPrice              = summary?.entryPrice ?? 0;
   const currentPrice            = (performance as any)?.currentAssetPrice
@@ -773,8 +829,11 @@ export default function Portfolio() {
                       const rowTfr = tfrScores[row.asset] ?? (row as any).tfrScore ?? 0;
                       const btcTfrVal = tfrScores["BTC"] ?? btcTfr;
                       const lead = rowTfr - btcTfrVal;
-                      const isRotationCandidate = row.asset !== "BTC" && lead >= 1.5;
-                      const isBuilding = row.asset !== "BTC" && lead > 0.8 && lead < 1.5;
+                      // Decision from the emitted rule block — NOT a TS threshold compare.
+                      // SIGNAL = the script's rotation rule is active for the emitted leader.
+                      const isRotationCandidate = row.asset === leaderAsset && row.asset !== "BTC" && rule("rule_5_rotate").active;
+                      // LEADER = descriptive label for the emitted best-alt; not a decision.
+                      const isBuilding = row.asset === leaderAsset && row.asset !== "BTC" && !isRotationCandidate;
 
                       const gs = row.galaxyScore ?? 0;
                       const gsPrev = row.prevGalaxyScore ?? 0;
@@ -804,7 +863,7 @@ export default function Portfolio() {
                               <span style={{ color: row.color }}>{row.icon}</span>
                               <span className="font-semibold text-foreground/85">{row.asset}</span>
                               {isRotationCandidate && <span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background: `${row.color}20`, color: row.color }}>SIGNAL</span>}
-                              {isBuilding && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(0.82 0.18 95 / 15%)", color: "oklch(0.82 0.18 95)" }}>BUILDING</span>}
+                              {isBuilding && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(0.82 0.18 95 / 15%)", color: "oklch(0.82 0.18 95)" }}>LEADER</span>}
                             </div>
                             <div className="text-right">
                               <span className="mono-data font-bold text-sm" style={{ color: row.color }}>{rowTfr > 0 ? rowTfr.toFixed(2) : row.score.toFixed(1)}</span>
@@ -939,19 +998,20 @@ export default function Portfolio() {
                           )}
                           <div className="flex items-center justify-between py-1.5 border-b border-border/20">
                             <span className="text-muted-foreground">Rotation fires at</span>
-                            <span className="font-semibold mono-data text-foreground/80">+1.5 TFR pt lead</span>
+                            <span className="font-semibold mono-data text-foreground/80">+{rotThreshold} TFR pt lead</span>
                           </div>
                           <div className="flex items-center justify-between py-1.5 border-b border-border/20">
-                            <span className="text-muted-foreground">Regime exit at</span>
-                            <span className="font-semibold mono-data" style={{ color: btcMom30 <= -3.5 ? "oklch(0.62 0.22 25)" : "oklch(0.78 0.18 75)" }}>
-                              {cashRisk?.regimeExitPrice && cashRisk.regimeExitPrice > 0
-                                ? `${formatUsd(cashRisk.regimeExitPrice)} (${cashRisk.distanceToRegimeExit != null ? (cashRisk.distanceToRegimeExit >= 0 ? "+" : "") + cashRisk.distanceToRegimeExit.toFixed(1) + "% buffer" : "−5% 30d mom"})`
-                                : "BTC 30d mom < −5%"}
+                            <span className="text-muted-foreground">Regime exit</span>
+                            {/* active flag from rulesStatus.rule_4_regime (decision); distance from cashRisk (display) */}
+                            <span className="font-semibold mono-data" style={{ color: rule("rule_4_regime").active ? "oklch(0.62 0.22 25)" : "oklch(0.78 0.18 75)" }}>
+                              {cashRisk?.distanceToRegimeExit != null
+                                ? `${cashRisk.distanceToRegimeExit.toFixed(1)}pp to ${cashRisk.regimeExitThreshold ?? -5}% 30d mom`
+                                : "BTC 30d mom vs −5%"}
                             </span>
                           </div>
                           <div className="flex items-center justify-between py-1.5">
                             <span className="text-muted-foreground">Stop loss</span>
-                            <span className="font-semibold mono-data" style={{ color: "oklch(0.62 0.22 25)" }}>{cashRisk?.stopLossLevel ? formatUsd(cashRisk.stopLossLevel) : "−15% from entry"}</span>
+                            <span className="font-semibold mono-data" style={{ color: rule("rule_2_stop").active ? "oklch(0.62 0.22 25)" : "oklch(0.78 0.18 75)" }}>{cashRisk?.stopReason || "−15% from entry"}</span>
                           </div>
                         </>
                       )}
@@ -1115,25 +1175,154 @@ export default function Portfolio() {
               <StatCard label="Cash-Out Events" value={String((performance?.counters as any)?.cashoutFires ?? 0)} sub={`${formatLargeNumber((performance?.counters as any)?.totalCashedOut ?? 0)} total cashed out to reserve`} color="oklch(0.82 0.18 95)" icon={<DollarSign size={14} />} />
             </div>
 
-            {/* ── Cash risk summary ── */}
-            {cashRisk && (
-              <div className="panel p-5">
-                <SectionTitle icon={<Shield size={14} className="text-primary opacity-70" />}>Cash Risk Summary</SectionTitle>
-                <div className="grid md:grid-cols-2 gap-4 text-sm text-muted-foreground">
-                  <div className="space-y-2">
-                    <p><span className="text-foreground font-semibold">Cash status:</span> <span style={{ color: toneColor(cashRisk.statusTone ?? "good") }}>{cashRisk.statusLabel}</span></p>
-                    <p><span className="text-foreground font-semibold">BTC 30d drawdown:</span> {cashRisk.btcDd30 != null ? `${(cashRisk.btcDd30 * 100).toFixed(1)}%` : "—"}</p>
-                    <p><span className="text-foreground font-semibold">Distance to crash exit:</span> {cashRisk.distanceToCrash != null ? `${cashRisk.distanceToCrash.toFixed(1)}pp` : "—"}</p>
+            {/* ══════════════════════════════════════════════════════════════════
+                ② EXIT TELEMETRY CHECKLIST (IN-POSITION) / ③ ENTRY GATE (CASH)
+                Active/triggered state comes ONLY from summary.rulesStatus.rule_N.active
+                (the authoritative decision). Distances/thresholds come from cashRisk.
+                The dashboard DISPLAYS the script's decisions; it never re-decides.
+            ══════════════════════════════════════════════════════════════════ */}
+            {cashRisk && currentAsset !== "CASH" && (
+              <div className="panel p-5" style={{ borderColor: "oklch(0.62 0.22 25 / 22%)" }}>
+                <SectionTitle icon={<Shield size={14} className="text-primary opacity-70" />}>Exit Telemetry — Prioritised Checklist</SectionTitle>
+                <div className="space-y-2">
+                  {([
+                    { n: 1, name: "Crash exit", r: rule("rule_1_crash"),
+                      dist: cashRisk.distanceToCrash != null ? `${cashRisk.distanceToCrash.toFixed(1)}pp to ${((cashRisk.crashThreshold ?? -0.25) * 100).toFixed(0)}% BTC 30d DD` : "BTC 30d drawdown vs −25%" },
+                    { n: 2, name: "Stop loss", r: rule("rule_2_stop"),
+                      dist: "−15% from entry price" },
+                    { n: 3, name: "MSB structural exit", r: rule("rule_3_msb"),
+                      dist: (summary?.holdDays ?? 0) >= minHoldDays ? "pivot-low break (active)" : `gated until day ${minHoldDays} (min hold)` },
+                    { n: 4, name: "Regime exit", r: rule("rule_4_regime"),
+                      dist: cashRisk.distanceToRegimeExit != null ? `${cashRisk.distanceToRegimeExit.toFixed(1)}pp to ${cashRisk.regimeExitThreshold ?? -5}% BTC 30d mom` : "BTC 30d mom vs −5%" },
+                  ]).map(row => (
+                    <div key={row.n} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 border"
+                      style={{
+                        background: row.r.active ? "oklch(0.62 0.22 25 / 8%)" : "oklch(1 0 0 / 3%)",
+                        borderColor: row.r.active ? "oklch(0.62 0.22 25 / 40%)" : "oklch(1 0 0 / 8%)",
+                      }}>
+                      <div className="flex items-start gap-2.5">
+                        <span className="text-xs mono-data text-muted-foreground/50 mt-0.5">{row.n}</span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-foreground/85">{row.name}</span>
+                            <span className="text-xs font-bold px-1.5 py-0.5 rounded"
+                              style={{ background: row.r.active ? "oklch(0.62 0.22 25 / 20%)" : "oklch(0.72 0.18 155 / 15%)", color: row.r.active ? "oklch(0.62 0.22 25)" : "oklch(0.72 0.18 155)" }}>
+                              {row.r.active ? "TRIGGERED" : "CLEAR"}
+                            </span>
+                          </div>
+                          {row.r.reason && <p className="text-xs text-muted-foreground/70 mt-0.5">{row.r.reason}</p>}
+                        </div>
+                      </div>
+                      <span className="text-xs mono-data text-muted-foreground text-right whitespace-nowrap mt-0.5">{row.dist}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Min-hold countdown — display only (days held vs MIN_HOLD_DAYS) */}
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/20 text-sm">
+                  <span className="text-muted-foreground">Min-hold countdown</span>
+                  <span className="font-semibold mono-data" style={{ color: (summary?.holdDays ?? 0) >= minHoldDays ? "oklch(0.72 0.18 155)" : "oklch(0.78 0.18 75)" }}>
+                    Day {summary?.holdDays ?? 0} of {minHoldDays}{(summary?.holdDays ?? 0) >= minHoldDays ? " — rotation rules eligible" : ""}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {cashRisk && currentAsset === "CASH" && (
+              <div className="panel p-5" style={{ borderColor: "oklch(0.78 0.18 75 / 22%)" }}>
+                <SectionTitle icon={<Shield size={14} className="text-primary opacity-70" />}>Entry Gate — Re-entry Conditions</SectionTitle>
+                <div className="space-y-2 text-sm">
+                  {/* Regime gate — emitted regime classification + 30d momentum (display only) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-border/20">
+                    <span className="text-muted-foreground">Regime gate (BTC 30d mom)</span>
+                    <span className="font-semibold mono-data" style={{ color: btcMom30 > 0 ? "oklch(0.72 0.18 155)" : "oklch(0.62 0.22 25)" }}>
+                      {regimeLabel} · {btcMom30 >= 0 ? "+" : ""}{btcMom30.toFixed(1)}%
+                    </span>
                   </div>
-                  <div className="space-y-2">
-                    <p><span className="text-foreground font-semibold">BTC 30d high:</span> {formatUsd(cashRisk.btc30dHigh)}</p>
-                    <p><span className="text-foreground font-semibold">Crash exit level:</span> {formatUsd(cashRisk.crashExitLevel)}</p>
-                    <p><span className="text-foreground font-semibold">Regime exit level:</span> <span style={{ color: (cashRisk.btcMom30 ?? 0) <= -3.5 ? "oklch(0.62 0.22 25)" : "inherit" }}>{cashRisk.regimeExitPrice && cashRisk.regimeExitPrice > 0 ? `${formatUsd(cashRisk.regimeExitPrice)} (${cashRisk.distanceToRegimeExit != null ? (cashRisk.distanceToRegimeExit >= 0 ? "+" : "") + cashRisk.distanceToRegimeExit.toFixed(1) + "% away" : ""})` : "BTC 30d mom < −5%"}</span></p>
-                    <p><span className="text-foreground font-semibold">Stop loss level:</span> {cashRisk.stopLossLevel ? formatUsd(cashRisk.stopLossLevel) : "—"}</p>
+                  {/* MSB gate — entryStatus phase + wait day vs limit */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-border/20">
+                    <span className="text-muted-foreground">MSB gate (wait day)</span>
+                    <span className="font-semibold mono-data text-foreground/80">
+                      Day {(entryStatus as any)?.msb_wait_day ?? msbWaitDays} of {msbWaitLimit}{(entryStatus as any)?.phase ? ` · ${(entryStatus as any).phase}` : ""}
+                    </span>
+                  </div>
+                  {((entryStatus as any)?.btc_breakout_level ?? btcBreakoutLevel) > 0 && (
+                    <div className="flex items-center justify-between py-1.5 border-b border-border/20">
+                      <span className="text-muted-foreground">BTC MSB breakout at</span>
+                      <span className="font-semibold mono-data" style={{ color: "oklch(0.78 0.18 75)" }}>
+                        {formatUsd((entryStatus as any)?.btc_breakout_level ?? btcBreakoutLevel)}
+                        {((entryStatus as any)?.btc_distance_pct ?? btcDistancePct) ? ` (${((entryStatus as any)?.btc_distance_pct ?? btcDistancePct).toFixed(1)}% away)` : ""}
+                      </span>
+                    </div>
+                  )}
+                  {/* Pending signal — emitted forecast / readiness, not synthesized */}
+                  <div className="flex items-center justify-between py-1.5">
+                    <span className="text-muted-foreground">Pending entry signal</span>
+                    <span className="font-semibold mono-data text-foreground/80">{predictedAction || preparation?.readiness || "Monitoring"}</span>
                   </div>
                 </div>
               </div>
             )}
+
+            {/* Regime soft-gate — DESCRIPTIVE only (no emitted active flag exists) */}
+            {cashRisk && (
+              <p className="text-xs text-muted-foreground/50 -mt-2">
+                Regime soft-gate: confidence {regimeConf.toFixed(1)}% vs {(strategyParameters as any)?.regime_gate_conf ?? 65}% choppy-block threshold (descriptive — the script does not emit a soft-gate active flag).
+              </p>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════════
+                ⑥ REFERENCE — Key parameters + live-run stats (NOT a backtest)
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="panel p-5">
+              <SectionTitle icon={<Layers size={14} className="text-primary opacity-70" />}>Reference — Parameters &amp; Live Run</SectionTitle>
+              <div className="grid md:grid-cols-2 gap-6 text-sm">
+                {/* Key parameters — emitted strategyParameters (static rule config) */}
+                <div>
+                  <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground/60 mb-2">Key Parameters</p>
+                  <div className="space-y-1.5">
+                    {([
+                      ["Min hold", (strategyParameters as any)?.min_hold_days != null ? `${(strategyParameters as any).min_hold_days} days` : `${minHoldDays} days`],
+                      ["Stop loss", (strategyParameters as any)?.stop_loss_pct != null ? `−${(Number((strategyParameters as any).stop_loss_pct) * 100).toFixed(0)}%` : "−15%"],
+                      ["Crash DD threshold", (strategyParameters as any)?.crash_dd_threshold != null ? `−${(Number((strategyParameters as any).crash_dd_threshold) * 100).toFixed(0)}%` : "−25%"],
+                      ["Regime exit threshold", (strategyParameters as any)?.regime_exit_threshold != null ? `${(strategyParameters as any).regime_exit_threshold}% 30d mom` : "−5% 30d mom"],
+                      ["Regime gate (choppy block)", (strategyParameters as any)?.regime_gate_conf != null ? `≥${(strategyParameters as any).regime_gate_conf}% conf` : "≥65% conf"],
+                      ["Cash-out rate", (strategyParameters as any)?.cashout_rate != null ? `${(Number((strategyParameters as any).cashout_rate) * 100).toFixed(0)}% of profit` : "—"],
+                      ["Rotation threshold", `+${rotThreshold} TFR pts`],
+                      ["MSB pivot / ATR bars", (strategyParameters as any)?.msb_pivot_bars != null ? `${(strategyParameters as any).msb_pivot_bars} / ${(strategyParameters as any).msb_atr_period ?? "—"}` : "—"],
+                    ] as Array<[string, string]>).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between">
+                        <span className="text-muted-foreground">{k}</span>
+                        <span className="font-semibold mono-data text-foreground/80">{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Live run since inception — emitted scriptPerformance. NOT a backtest. */}
+                <div>
+                  <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground/60 mb-2">
+                    Live Run Since Inception ({(scriptPerformance as any)?.total_trades ?? performance?.counters?.totalTrades ?? 0} trades)
+                  </p>
+                  <div className="space-y-1.5">
+                    {([
+                      ["Win rate", (scriptPerformance as any)?.win_rate_pct != null ? `${Number((scriptPerformance as any).win_rate_pct).toFixed(1)}%` : "—"],
+                      ["Rotations", (scriptPerformance as any)?.rotations],
+                      ["Entries", (scriptPerformance as any)?.entries],
+                      ["Regime exits", (scriptPerformance as any)?.regime_exits],
+                      ["Stop losses", (scriptPerformance as any)?.stop_losses],
+                      ["MSB exits", (scriptPerformance as any)?.msb_exits],
+                      ["Crash exits", (scriptPerformance as any)?.crash_exits],
+                      ["Rotations blocked by regime", (scriptPerformance as any)?.rotations_blocked_by_regime],
+                    ] as Array<[string, unknown]>).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between">
+                        <span className="text-muted-foreground">{k}</span>
+                        <span className="font-semibold mono-data text-foreground/80">{v != null ? String(v) : "—"}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground/40 mt-2">Live trading results since strategy inception — not a backtest.</p>
+                </div>
+              </div>
+            </div>
 
             {/* ── Trade history ── */}
             <div className="panel p-5">
