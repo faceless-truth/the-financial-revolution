@@ -1,5 +1,5 @@
 import { router, publicProcedure } from "./_core/trpc";
-import { getLivePortfolioData, getLiveDashboardData, getMsbSignals } from "./livePortfolio";
+import { getLivePortfolioData, getLiveDashboardData, getMsbSignals, getSqueezeData } from "./livePortfolio";
 
 export const livePortfolioRouter = router({
   getSnapshot: publicProcedure.query(async () => {
@@ -10,5 +10,8 @@ export const livePortfolioRouter = router({
   }),
   getMsbSignals: publicProcedure.query(async () => {
     return getMsbSignals();
+  }),
+  getSqueezeData: publicProcedure.query(async () => {
+    return getSqueezeData();
   }),
 });
