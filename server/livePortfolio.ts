@@ -230,38 +230,76 @@ function buildRanking(state: any, lc?: Record<string, any>): Array<{ asset: stri
 
 // ── Build cash risk monitor data ──────────────────────────────────────────────
 
-function buildCashRisk(state: any): {
-  btcPrice:         number;
-  btcDd30:          number;
-  btcMom30:         number;
-  btc30dHigh:       number;
-  crashExitLevel:   number;
-  stopLossLevel:    number;
-  distanceToCrash:  number;
-  crashActive:      boolean;
-  stopActive:       boolean;
-  statusLabel:      string;
-  statusTone:       "good" | "warn" | "danger";
-  regimeExitPrice:      number;
-  distanceToRegimeExit: number;
+function buildCashRisk(state: any, optData: any = {}): {
+  btcPrice:              number;
+  btcDd30:               number;
+  btcMom30:              number;
+  btc30dHigh:            number;
+  crashExitLevel:        number;
+  stopLossLevel:         number;
+  distanceToCrash:       number;
+  crashActive:           boolean;
+  stopActive:            boolean;
+  statusLabel:           string;
+  statusTone:            "good" | "warn" | "danger";
+  regimeExitPrice:       number;
+  distanceToRegimeExit:  number;
+  // ── new passthrough fields (additive; names above are unchanged for Home.tsx) ──
+  crashThreshold:        number;
+  regimeExitThreshold:   number;
+  regimeState:           string;
+  crashReason:           string;
+  stopReason:            string;
+  msbReason:             string;
+  regimeReason:          string;
+  rotateReason:          string;
+  msbActive:             boolean;
+  regimeActive:          boolean;
 } {
-  const mktData        = state?.market_data ?? {};
-  const btc            = mktData?.BTC ?? {};
-  const btcPrice       = toNumber(btc?.price,   0);
-  const btcDd30        = toNumber(btc?.dd_30,   0);
-  const btcMom30       = toNumber(btc?.mom_30,  0);
-  const btc30dHigh     = btcPrice > 0 && btcDd30 < 0
-    ? btcPrice / (1 + btcDd30)
-    : btcPrice;
-  const crashExitLevel = btc30dHigh * 0.75;
-  const entryPrice     = toNumber(state?.entry_price, 0);
-  const stopLossLevel  = entryPrice > 0 ? entryPrice * 0.85 : 0;
-  const distanceToCrash = btcDd30 < 0 ? Math.max(0, 25 + btcDd30 * 100) : 25;
-  const crashActive    = btcDd30 <= -0.25;
-  const stopActive     = entryPrice > 0 && btcPrice > 0 && ((btcPrice - entryPrice) / entryPrice) <= -0.15;
-  const price30dAgo    = btcMom30 !== -100 && btcPrice > 0 ? btcPrice / (1 + btcMom30 / 100) : 0;
-  const regimeExitPrice = price30dAgo > 0 ? price30dAgo * 0.95 : 0;
-  const distanceToRegimeExit = regimeExitPrice > 0 && btcPrice > 0 ? ((btcPrice - regimeExitPrice) / btcPrice) * 100 : 0;
+  // ── Recompute fallbacks (used ONLY when optimized_strategy_data.json is absent/stale) ──
+  const mktData      = state?.market_data ?? {};
+  const btc          = mktData?.BTC ?? {};
+  const entryPrice   = toNumber(state?.entry_price, 0);
+  const rcBtcPrice   = toNumber(btc?.price,  0);
+  const rcBtcDd30    = toNumber(btc?.dd_30,  0);  // negative fraction e.g. -0.12
+  const rcBtcMom30   = toNumber(btc?.mom_30, 0);
+  const rcBtc30dHigh = rcBtcPrice > 0 && rcBtcDd30 < 0 ? rcBtcPrice / (1 + rcBtcDd30) : rcBtcPrice;
+  const rcDistCrash  = rcBtcDd30 < 0 ? Math.max(0, 25 + rcBtcDd30 * 100) : 25;
+  const rcDistRegime = rcBtcMom30 - (-5);  // momentum-space, to match the script's emitted axis
+  const rcCrashActive = rcBtcDd30 <= -0.25;
+  const rcStopActive  = entryPrice > 0 && rcBtcPrice > 0 && ((rcBtcPrice - entryPrice) / entryPrice) <= -0.15;
+
+  // ── Passthrough from the live script's emitted btc_health / rules_status ──
+  // The dashboard DISPLAYS what the script decided; it does not re-decide exit rules here.
+  const health = optData?.btc_health   ?? {};
+  const rules  = optData?.rules_status ?? {};
+
+  const btcPrice             = toNumber(health?.btc_close,                    rcBtcPrice);
+  const btcDd30              = toNumber(health?.btc_dd_30d,                   rcBtcDd30);
+  const btcMom30             = toNumber(health?.btc_mom_30,                   rcBtcMom30);
+  const btc30dHigh           = toNumber(health?.btc_30d_high,                 rcBtc30dHigh);
+  const distanceToCrash      = toNumber(health?.distance_to_crash_pct,        rcDistCrash);
+  const distanceToRegimeExit = toNumber(health?.distance_to_regime_exit_pct,  rcDistRegime);
+  const crashThreshold       = toNumber(health?.crash_threshold,       -0.25);
+  const regimeExitThreshold  = toNumber(health?.regime_exit_threshold, -5);
+  const regimeState          = asString(health?.regime_state, "");
+
+  const crashActive  = typeof rules?.rule_1_crash?.active === "boolean" ? rules.rule_1_crash.active : rcCrashActive;
+  const stopActive   = typeof rules?.rule_2_stop?.active  === "boolean" ? rules.rule_2_stop.active  : rcStopActive;
+  const msbActive    = Boolean(rules?.rule_3_msb?.active);
+  const regimeActive = Boolean(rules?.rule_4_regime?.active);
+  const crashReason  = asString(rules?.rule_1_crash?.reason,  "");
+  const stopReason   = asString(rules?.rule_2_stop?.reason,   "");
+  const msbReason    = asString(rules?.rule_3_msb?.reason,    "");
+  const regimeReason = asString(rules?.rule_4_regime?.reason, "");
+  const rotateReason = asString(rules?.rule_5_rotate?.reason, "");
+
+  // B-opt-1: no TS-derived $ exit levels on screen. The script emits thresholds, pp-distances and
+  // human-readable reasons (e.g. rule_2_stop.reason = "Stop loss at $67,246"); the UI shows those,
+  // not a re-derived price. All three $-level fields are surfaced as 0; consumers guard on > 0 / falsy.
+  const crashExitLevel  = 0;
+  const stopLossLevel   = 0;
+  const regimeExitPrice = 0;
 
   let statusLabel: string;
   let statusTone: "good" | "warn" | "danger";
@@ -286,6 +324,9 @@ function buildCashRisk(state: any): {
     distanceToCrash, crashActive, stopActive,
     statusLabel, statusTone,
     regimeExitPrice, distanceToRegimeExit,
+    crashThreshold, regimeExitThreshold, regimeState,
+    crashReason, stopReason, msbReason, regimeReason, rotateReason,
+    msbActive, regimeActive,
   };
 }
 
@@ -483,7 +524,7 @@ export async function getLivePortfolioData() {
 
   const readiness         = deriveReadiness(state, history);
   const ranking           = buildRanking(state, lunarCrush);
-  const cashRisk          = buildCashRisk(state);
+  const cashRisk          = buildCashRisk(state, optData);
 
   const btcScore          = toNumber(mktData?.BTC?.score, 0);
   const topCandidates     = ranking.map(r => ({ asset: r.asset, symbol: r.asset, score: r.score }));
@@ -555,6 +596,14 @@ export async function getLivePortfolioData() {
       leadOverBtc:                toNumber(optData?.scores?.lead_over_btc, 0),
       rotThreshold:               toNumber(optData?.parameters?.tfr_rotation_threshold, 1.5),
       minHoldDays:                toNumber(optData?.parameters?.min_hold_days, 7),
+      // ── full passthrough blocks the server previously dropped (raw, 1:1, empty-object fallback) ──
+      leaderScore:                toNumber(optData?.scores?.leader_score, 0),
+      allAssetScores:             optData?.scores?.all_assets   ?? {},
+      btcHealth:                  optData?.btc_health           ?? {},
+      rulesStatus:                optData?.rules_status         ?? {},
+      entryStatus:                optData?.rules_status?.rule_6_entry ?? {},
+      strategyParameters:         optData?.parameters           ?? {},
+      scriptPerformance:          optData?.performance          ?? {},
     },
     performance: {
       btcHoldValueUsd:     0,  // populated by script if tracking BTC benchmark
