@@ -4,6 +4,7 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getLivePortfolioData, getLiveDashboardData, getMsbSignals, getSqueezeData } from "./livePortfolio";
+import { getBullRotationDashboard } from "./bullRotation";
 import {
   addSubscription,
   removeSubscription,
@@ -57,6 +58,18 @@ async function startServer() {
     } catch (error) {
       res.status(500).json({
         error: "Unable to load live dashboard snapshot",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.get("/api/bull-rotation", async (_req, res) => {
+    try {
+      const data = await getBullRotationDashboard();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({
+        error: "Unable to load Bull Rotation dashboard payload",
         details: error instanceof Error ? error.message : String(error),
       });
     }

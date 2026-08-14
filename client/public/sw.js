@@ -1,5 +1,7 @@
-/* TFR Service Worker v3.0 — VAPID Web Push + offline caching */
-const CACHE_NAME = "TFR_CACHE_V5";
+/* TFR Service Worker v3.1 — VAPID Web Push + offline caching
+   V6: navigations are network-first so app upgrades show immediately; the
+   version bump purges the old cache (which pinned a stale index.html). */
+const CACHE_NAME = "TFR_CACHE_V6";
 const TFR_ICON   = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/tfr-icon_467cb428.png";
 
 // ── Install: skip waiting immediately ────────────────────────────────────────
@@ -14,13 +16,30 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Fetch: network-first for API, cache-first for assets
+// Fetch: network-first for API + navigations (HTML shell), cache-first for
+// hashed static assets (JS/CSS filenames change on every build, so caching
+// those aggressively is safe and just speeds up repeat loads).
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   if (!event.request.url.startsWith("http")) return;
 
-  if (event.request.url.includes("binance.com") || event.request.url.includes("/api/")) {
-    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+  const isApiOrLive = event.request.url.includes("binance.com") || event.request.url.includes("/api/");
+  const isNavigation = event.request.mode === "navigate";
+
+  if (isApiOrLive || isNavigation) {
+    // Always try the network first so new deploys (new index.html / new JS
+    // bundle references) show up immediately; fall back to cache only offline.
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (isNavigation && response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 
@@ -99,7 +118,7 @@ self.addEventListener("push", (event) => {
     renotify: true,
     silent:   false,
     vibrate:  [200, 100, 200],
-    data:     { url: "/portfolio" },
+    data:     { url: "/bull-rotation" },
     actions: [
       { action: "open",    title: "View Dashboard" },
       { action: "dismiss", title: "Dismiss"         },
@@ -114,7 +133,7 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   if (event.action === "dismiss") return;
 
-  const urlToOpen = (event.notification.data && event.notification.data.url) || "/portfolio";
+  const urlToOpen = (event.notification.data && event.notification.data.url) || "/bull-rotation";
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
