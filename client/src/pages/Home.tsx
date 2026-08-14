@@ -419,7 +419,7 @@ export default function Home() {
                   <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Crash exit rule</p>
                   <div className="space-y-2 text-sm text-muted-foreground">
                     <p><span className="text-foreground font-semibold">BTC 30d high:</span> {formatUsd(cashRisk?.btc30dHigh ?? 0)}</p>
-                    <p><span className="text-foreground font-semibold">Crash exit level (-25%):</span> {formatUsd(cashRisk?.crashExitLevel ?? 0)}</p>
+                    <p><span className="text-foreground font-semibold">Crash exit level (-25%):</span> {cashRisk?.crashExitLevel ? formatUsd(cashRisk.crashExitLevel) : "—"}</p>
                     <p><span className="text-foreground font-semibold">BTC current price:</span> {formatUsd(cashRisk?.btcPrice ?? 0)}</p>
                     <p><span className="text-foreground font-semibold">Crash active:</span> {cashRisk?.crashActive ? "Yes — in CASH" : "No"}</p>
                   </div>

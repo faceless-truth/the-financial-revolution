@@ -6,13 +6,15 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Portfolio from "./pages/Portfolio";
+import BullRotation from "./pages/BullRotation";
 import PasswordGate from "./components/PasswordGate";
 
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"}><Redirect to="/portfolio" /></Route>
+      <Route path={"/"}><Redirect to="/bull-rotation" /></Route>
+      <Route path={"/bull-rotation"} component={BullRotation} />
       <Route path={"/portfolio"} component={Portfolio} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}

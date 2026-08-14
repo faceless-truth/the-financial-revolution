@@ -1,5 +1,5 @@
 /**
- * BULL_ROTATE v2.0 + Regime Soft Gate + Profit Cash-Out — Server Data Adapter
+ * BULL_ROTATE v4.1 — Server Data Adapter (schema v3.0)
  * ─────────────────────────────────────────────────────────────────────────────
  * Reads state files written by the bull_rotate.py script on the droplet
  * and exposes clean, typed snapshots to the frontend via /api/live-dashboard
@@ -23,7 +23,12 @@ import path from "path";
 const DASHBOARD_ROOT = process.env.CRYPTO_DASHBOARD_ROOT ?? "/root/crypto_dashboard";
 const STATE_FILE     = process.env.BULL_ROTATE_STATE_FILE   ?? path.join(DASHBOARD_ROOT, "bull_rotate_state.json");
 const HISTORY_FILE   = process.env.BULL_ROTATE_HISTORY_FILE ?? path.join(DASHBOARD_ROOT, "bull_rotate_history.json");
-const MSB_FILE       = process.env.BULL_ROTATE_MSB_FILE     ?? path.join(DASHBOARD_ROOT, "msb_signals.json");
+const MSB_FILE            = process.env.BULL_ROTATE_MSB_FILE     ?? path.join(DASHBOARD_ROOT, "msb_signals.json");
+const OPTIMIZED_DATA_FILE = path.join(DASHBOARD_ROOT, "optimized_strategy_data.json");
+const LUNARCRUSH_API_KEY = process.env.LUNARCRUSH_API_KEY ?? "";
+const LUNARCRUSH_TOPIC_MAP: Record<string, string> = {
+  BTC: "bitcoin", ETH: "ethereum", SOL: "solana", DOGE: "dogecoin", SUI: "sui",
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,8 +82,8 @@ function describeAction(action: string, position: string, reason: string): strin
     case "STOP_CASH":    return `BTC hit -15% stop loss — moved to CASH`;
     case "STOP_TO_BTC":  return `${position} hit -15% stop loss — rotated back to BTC`;
     case "ROTATE":       return reason || `Rotated into ${position}`;
-    case "HOLD_MIN":     return `Holding — 3-day minimum hold active`;
-    case "HOLD_CASH":    return `Holding CASH — BTC 30d momentum still negative`;
+    case "HOLD_MIN":     return `Holding — minimum hold active`;
+    case "HOLD_CASH":    return reason || `Holding CASH — waiting for re-entry conditions`;
     case "HOLD":         return reason || `Holding ${position}`;
     default:             return reason || action;
   }
@@ -111,24 +116,67 @@ function deriveReadiness(state: any, history: any[]): {
   const altLead = bestAltScore - btcScore;
   const needsMore = 30 - altLead;
 
+  const msbWaitLocal   = toNumber(state?.msb_wait_days, 0);
+  const msbWaitingLocal = Boolean(state?.msb_waiting ?? false);
+  const btcMom30Local  = toNumber(state?.market_data?.BTC?.mom_30, 0);
   if (action === "CRASH_EXIT" || action === "STOP_CASH" || action === "HOLD_CASH") {
+    if (btcMom30Local > 0 && msbWaitingLocal) {
+      const btcBreakout = toNumber(state?.market_data?.BTC?.breakout_level, 0);
+      const daysLeft = Math.max(0, 5 - msbWaitLocal);
+      return {
+        status: "CASH_WAITING_MSB",
+        label: `Waiting for BTC MSB (day ${msbWaitLocal} of 5)`,
+        note: `Regime is bullish (+${btcMom30Local.toFixed(1)}% 30d). Waiting for BTC to close above $${btcBreakout > 0 ? btcBreakout.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "breakout level"}. Fallback entry in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`,
+        blocker: btcBreakout > 0 ? `BTC must close above $${btcBreakout.toLocaleString("en-US", { maximumFractionDigits: 0 })} for MSB entry` : "Waiting for BTC MSB breakout",
+      };
+    }
     return {
       status: "CASH",
       label: "In Cash",
-      note: "Strategy is in cash. Re-entry requires BTC 30d momentum to turn positive.",
-      blocker: "BTC 30d momentum must turn positive before re-entering.",
+      note: btcMom30Local <= 0 ? `Holding CASH — BTC 30d momentum is ${btcMom30Local.toFixed(1)}% (must turn positive to re-enter).` : "Strategy is in cash. Re-entry requires BTC MSB breakout or 5-day fallback.",
+      blocker: btcMom30Local <= 0 ? "BTC 30d momentum must turn positive before re-entering." : "Waiting for BTC MSB breakout signal.",
     };
   }
 
-  if (holdDays < 3 && position !== "CASH") {
+  const minHoldDaysLocal = toNumber(state?.min_hold_days, 7);
+  if (holdDays < minHoldDaysLocal && position !== "CASH") {
     return {
       status: "HOLD_MIN",
-      label: "Min Hold Active",
-      note: `Holding ${position} — 3-day minimum hold active (day ${holdDays} of 3).`,
-      blocker: `${3 - holdDays} more day${3 - holdDays === 1 ? "" : "s"} until rotation is eligible.`,
+      label: `Min Hold — Day ${holdDays} of ${minHoldDaysLocal}`,
+      note: `Holding ${position} — minimum hold active (day ${holdDays} of ${minHoldDaysLocal}). Rotation rules are gated until day ${minHoldDaysLocal}.`,
+      blocker: `${minHoldDaysLocal - holdDays} more day${minHoldDaysLocal - holdDays === 1 ? "" : "s"} until rotation is eligible.`,
     };
   }
 
+  // v4.0: use TFR scores for rotation readiness (threshold = 1.5 points)
+  const mktDataForTfr = state?.market_data ?? {};
+  const btcTfrLocal = toNumber((mktDataForTfr?.BTC as any)?.tfr_score, 0);
+  let bestAltTfr = "";
+  let bestAltTfrScore = -Infinity;
+  for (const [asset, data] of Object.entries(mktDataForTfr) as [string, any][]) {
+    if (asset !== "BTC") {
+      const tfrScore = toNumber((data as any)?.tfr_score, 0);
+      if (tfrScore > bestAltTfrScore) { bestAltTfrScore = tfrScore; bestAltTfr = asset; }
+    }
+  }
+  const tfrLead = bestAltTfrScore - btcTfrLocal;
+  const TFR_THRESHOLD = 1.5;
+  if (bestAltTfr && tfrLead >= TFR_THRESHOLD) {
+    return {
+      status: "ROTATE_READY",
+      label: "Rotation Signal Active",
+      note: `${bestAltTfr} TFR score (${bestAltTfrScore.toFixed(3)}) leads BTC (${btcTfrLocal.toFixed(3)}) by +${tfrLead.toFixed(3)} — rotation threshold of ${TFR_THRESHOLD} exceeded.`,
+      blocker: null,
+    };
+  }
+  if (bestAltTfr && tfrLead > 0.8) {
+    return {
+      status: "WATCH",
+      label: "Building",
+      note: `${bestAltTfr} TFR score (${bestAltTfrScore.toFixed(3)}) is building — leads BTC by +${tfrLead.toFixed(3)}. Needs +${(TFR_THRESHOLD - tfrLead).toFixed(3)} more to trigger rotation.`,
+      blocker: `${bestAltTfr} needs +${(TFR_THRESHOLD - tfrLead).toFixed(3)} more TFR lead over BTC.`,
+    };
+  }
   if (bestAlt && altLead >= 30) {
     return {
       status: "ROTATE_READY",
@@ -137,7 +185,6 @@ function deriveReadiness(state: any, history: any[]): {
       blocker: null,
     };
   }
-
   if (bestAlt && altLead > 15) {
     return {
       status: "WATCH",
@@ -146,60 +193,113 @@ function deriveReadiness(state: any, history: any[]): {
       blocker: `${bestAlt} needs ${needsMore.toFixed(1)}pp more composite score lead over BTC.`,
     };
   }
-
   return {
     status: "HOLD",
     label: "Holding",
-    note: `Holding ${position} — no alt exceeds BTC composite score by 30pp. BTC is the strongest asset.`,
+    note: btcMom30Local > 0 ? `Holding ${position} — BTC is strongest asset. ${bestAltTfr ? `${bestAltTfr} leads BTC TFR by +${tfrLead.toFixed(2)} pts (need 1.5 to rotate).` : "No rotation signal."}` : `Holding ${position} — BTC 30d momentum ${btcMom30Local.toFixed(1)}%.`,
     blocker: null,
   };
 }
 
 // ── Build momentum ranking from market_data ───────────────────────────────────
 
-function buildRanking(state: any): Array<{ asset: string; score: number; mom30: number; price: number; color: string; icon: string }> {
+function buildRanking(state: any, lc?: Record<string, any>): Array<{ asset: string; score: number; mom30: number; price: number; color: string; icon: string; galaxyScore: number; altRank: number; sentiment: number; prevGalaxyScore: number; prevAltRank: number; prevSentiment: number; trend: string }> {
   const mktData = state?.market_data ?? {};
   return Object.entries(mktData)
-    .map(([asset, data]: [string, any]) => ({
-      asset,
-      score:  toNumber(data?.score,   0),
-      mom30:  toNumber(data?.mom_30,  0),
-      price:  toNumber(data?.price,   0),
-      color:  ASSET_COLORS[asset] ?? "oklch(0.60 0.22 255)",
-      icon:   ASSET_ICONS[asset]  ?? asset[0],
-    }))
-    .sort((a, b) => b.score - a.score);
+    .map(([asset, data]: [string, any]) => {
+      const lcData = lc?.[asset] ?? {};
+      return {
+        asset,
+        score:           toNumber(data?.score,     0),
+        tfrScore:        toNumber((data as any)?.tfr_score, 0),
+        mom30:           toNumber(data?.mom_30,    0),
+        price:           toNumber(data?.price,     0),
+        color:           ASSET_COLORS[asset] ?? "oklch(0.60 0.22 255)",
+        icon:            ASSET_ICONS[asset]  ?? asset[0],
+        galaxyScore:     toNumber(lcData.galaxyScore,     0),
+        altRank:         toNumber(lcData.altRank,         0),
+        sentiment:       toNumber(lcData.sentiment,       0),
+        prevGalaxyScore: toNumber(lcData.prevGalaxyScore, 0),
+        prevAltRank:     toNumber(lcData.prevAltRank,     0),
+        prevSentiment:   toNumber(lcData.prevSentiment,   0),
+        trend:           lcData.trend ?? "",
+      };
+    })
+    .sort((a, b) => (b.tfrScore || b.score) - (a.tfrScore || a.score));
 }
 
 // ── Build cash risk monitor data ──────────────────────────────────────────────
 
-function buildCashRisk(state: any): {
-  btcPrice:         number;
-  btcDd30:          number;
-  btcMom30:         number;
-  btc30dHigh:       number;
-  crashExitLevel:   number;
-  stopLossLevel:    number;
-  distanceToCrash:  number;
-  crashActive:      boolean;
-  stopActive:       boolean;
-  statusLabel:      string;
-  statusTone:       "good" | "warn" | "danger";
+function buildCashRisk(state: any, optData: any = {}): {
+  btcPrice:              number;
+  btcDd30:               number;
+  btcMom30:              number;
+  btc30dHigh:            number;
+  crashExitLevel:        number;
+  stopLossLevel:         number;
+  distanceToCrash:       number;
+  crashActive:           boolean;
+  stopActive:            boolean;
+  statusLabel:           string;
+  statusTone:            "good" | "warn" | "danger";
+  regimeExitPrice:       number;
+  distanceToRegimeExit:  number;
+  // ── new passthrough fields (additive; names above are unchanged for Home.tsx) ──
+  crashThreshold:        number;
+  regimeExitThreshold:   number;
+  regimeState:           string;
+  crashReason:           string;
+  stopReason:            string;
+  msbReason:             string;
+  regimeReason:          string;
+  rotateReason:          string;
+  msbActive:             boolean;
+  regimeActive:          boolean;
 } {
-  const mktData        = state?.market_data ?? {};
-  const btc            = mktData?.BTC ?? {};
-  const btcPrice       = toNumber(btc?.price,   0);
-  const btcDd30        = toNumber(btc?.dd_30,   0);  // negative fraction e.g. -0.12
-  const btcMom30       = toNumber(btc?.mom_30,  0);
-  const btc30dHigh     = btcPrice > 0 && btcDd30 < 0
-    ? btcPrice / (1 + btcDd30)
-    : btcPrice;
-  const crashExitLevel = btc30dHigh * 0.75;
-  const entryPrice     = toNumber(state?.entry_price, 0);
-  const stopLossLevel  = entryPrice > 0 ? entryPrice * 0.85 : 0;
-  const distanceToCrash = btcDd30 < 0 ? Math.max(0, 25 + btcDd30 * 100) : 25;
-  const crashActive    = btcDd30 <= -0.25;
-  const stopActive     = entryPrice > 0 && btcPrice > 0 && ((btcPrice - entryPrice) / entryPrice) <= -0.15;
+  // ── Recompute fallbacks (used ONLY when optimized_strategy_data.json is absent/stale) ──
+  const mktData      = state?.market_data ?? {};
+  const btc          = mktData?.BTC ?? {};
+  const entryPrice   = toNumber(state?.entry_price, 0);
+  const rcBtcPrice   = toNumber(btc?.price,  0);
+  const rcBtcDd30    = toNumber(btc?.dd_30,  0);  // negative fraction e.g. -0.12
+  const rcBtcMom30   = toNumber(btc?.mom_30, 0);
+  const rcBtc30dHigh = rcBtcPrice > 0 && rcBtcDd30 < 0 ? rcBtcPrice / (1 + rcBtcDd30) : rcBtcPrice;
+  const rcDistCrash  = rcBtcDd30 < 0 ? Math.max(0, 25 + rcBtcDd30 * 100) : 25;
+  const rcDistRegime = rcBtcMom30 - (-5);  // momentum-space, to match the script's emitted axis
+  const rcCrashActive = rcBtcDd30 <= -0.25;
+  const rcStopActive  = entryPrice > 0 && rcBtcPrice > 0 && ((rcBtcPrice - entryPrice) / entryPrice) <= -0.15;
+
+  // ── Passthrough from the live script's emitted btc_health / rules_status ──
+  // The dashboard DISPLAYS what the script decided; it does not re-decide exit rules here.
+  const health = optData?.btc_health   ?? {};
+  const rules  = optData?.rules_status ?? {};
+
+  const btcPrice             = toNumber(health?.btc_close,                    rcBtcPrice);
+  const btcDd30              = toNumber(health?.btc_dd_30d,                   rcBtcDd30);
+  const btcMom30             = toNumber(health?.btc_mom_30,                   rcBtcMom30);
+  const btc30dHigh           = toNumber(health?.btc_30d_high,                 rcBtc30dHigh);
+  const distanceToCrash      = toNumber(health?.distance_to_crash_pct,        rcDistCrash);
+  const distanceToRegimeExit = toNumber(health?.distance_to_regime_exit_pct,  rcDistRegime);
+  const crashThreshold       = toNumber(health?.crash_threshold,       -0.25);
+  const regimeExitThreshold  = toNumber(health?.regime_exit_threshold, -5);
+  const regimeState          = asString(health?.regime_state, "");
+
+  const crashActive  = typeof rules?.rule_1_crash?.active === "boolean" ? rules.rule_1_crash.active : rcCrashActive;
+  const stopActive   = typeof rules?.rule_2_stop?.active  === "boolean" ? rules.rule_2_stop.active  : rcStopActive;
+  const msbActive    = Boolean(rules?.rule_3_msb?.active);
+  const regimeActive = Boolean(rules?.rule_4_regime?.active);
+  const crashReason  = asString(rules?.rule_1_crash?.reason,  "");
+  const stopReason   = asString(rules?.rule_2_stop?.reason,   "");
+  const msbReason    = asString(rules?.rule_3_msb?.reason,    "");
+  const regimeReason = asString(rules?.rule_4_regime?.reason, "");
+  const rotateReason = asString(rules?.rule_5_rotate?.reason, "");
+
+  // B-opt-1: no TS-derived $ exit levels on screen. The script emits thresholds, pp-distances and
+  // human-readable reasons (e.g. rule_2_stop.reason = "Stop loss at $67,246"); the UI shows those,
+  // not a re-derived price. All three $-level fields are surfaced as 0; consumers guard on > 0 / falsy.
+  const crashExitLevel  = 0;
+  const stopLossLevel   = 0;
+  const regimeExitPrice = 0;
 
   let statusLabel: string;
   let statusTone: "good" | "warn" | "danger";
@@ -223,15 +323,126 @@ function buildCashRisk(state: any): {
     crashExitLevel, stopLossLevel,
     distanceToCrash, crashActive, stopActive,
     statusLabel, statusTone,
+    regimeExitPrice, distanceToRegimeExit,
+    crashThreshold, regimeExitThreshold, regimeState,
+    crashReason, stopReason, msbReason, regimeReason, rotateReason,
+    msbActive, regimeActive,
   };
+}
+
+
+// ── LunarCrush social metrics ─────────────────────────────────────────────────
+interface LunarCrushMetrics {
+  galaxyScore:    number;
+  altRank:        number;
+  sentiment:      number;
+  interactions24h: number;
+  numPosts:       number;
+  trend:          string;
+  prevGalaxyScore: number;
+  prevAltRank:    number;
+  prevSentiment:  number;
+}
+
+const LUNARCRUSH_CACHE_FILE = path.join(DASHBOARD_ROOT, "lunarcrush_cache.json");
+const LUNARCRUSH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function getLunarCrushData(): Promise<Record<string, LunarCrushMetrics>> {
+  const assets = ["BTC", "ETH", "SOL", "DOGE", "SUI"];
+  const results: Record<string, LunarCrushMetrics> = {};
+
+  // Try to read from cache first
+  try {
+    const cacheRaw = await fs.readFile(LUNARCRUSH_CACHE_FILE, "utf8");
+    const cacheData = JSON.parse(cacheRaw);
+    if (cacheData && cacheData.timestamp && (Date.now() - cacheData.timestamp < LUNARCRUSH_CACHE_TTL_MS)) {
+      return cacheData.data;
+    }
+  } catch (e) {
+    // Cache miss or invalid, proceed to fetch
+  }
+
+  let fetchedAny = false;
+
+  await Promise.all(assets.map(async (asset) => {
+    const empty: LunarCrushMetrics = {
+      galaxyScore: 0, altRank: 0, sentiment: 0,
+      interactions24h: 0, numPosts: 0, trend: "",
+      prevGalaxyScore: 0, prevAltRank: 0, prevSentiment: 0,
+    };
+    if (!LUNARCRUSH_API_KEY) { results[asset] = empty; return; }
+    try {
+      // Current snapshot — coin endpoint
+      const coinRes = await fetch(
+        `https://lunarcrush.com/api4/public/coins/${asset}/v1`,
+        { headers: { Authorization: `Bearer ${LUNARCRUSH_API_KEY}` } }
+      );
+      const coinJson = await coinRes.json() as any;
+      const coin = coinJson?.data ?? {};
+
+      // Social topic snapshot
+      const topic = LUNARCRUSH_TOPIC_MAP[asset] ?? asset.toLowerCase();
+      const topicRes = await fetch(
+        `https://lunarcrush.com/api4/public/topic/${topic}/v1`,
+        { headers: { Authorization: `Bearer ${LUNARCRUSH_API_KEY}` } }
+      );
+      const topicJson = await topicRes.json() as any;
+      const topicData = topicJson?.data ?? {};
+
+      // Previous day — time series (last 2 days)
+      const tsRes = await fetch(
+        `https://lunarcrush.com/api4/public/coins/${asset}/time-series/v2?interval=1d&start=${Math.floor(Date.now() / 1000) - 86400 * 2}`,
+        { headers: { Authorization: `Bearer ${LUNARCRUSH_API_KEY}` } }
+      );
+      const tsJson = await tsRes.json() as any;
+      const tsRows: any[] = tsJson?.data ?? [];
+      const prevRow = tsRows.length >= 2 ? tsRows[tsRows.length - 2] : null;
+
+      // Sentiment: average across available platforms
+      const sentMap: Record<string, number> = topicData?.types_sentiment ?? {};
+      const sentVals = Object.values(sentMap).filter((v): v is number => typeof v === "number" && v > 0);
+      const sentiment = sentVals.length > 0 ? Math.round(sentVals.reduce((a, b) => a + b, 0) / sentVals.length) : 0;
+
+      results[asset] = {
+        galaxyScore:     typeof coin.galaxy_score === "number" ? coin.galaxy_score : 0,
+        altRank:         typeof coin.alt_rank     === "number" ? coin.alt_rank     : 0,
+        sentiment,
+        interactions24h: typeof topicData.interactions_24h === "number" ? topicData.interactions_24h : 0,
+        numPosts:        typeof topicData.num_posts         === "number" ? topicData.num_posts         : 0,
+        trend:           typeof topicData.trend             === "string" ? topicData.trend             : "",
+        prevGalaxyScore: prevRow?.galaxy_score ?? 0,
+        prevAltRank:     prevRow?.alt_rank     ?? 0,
+        prevSentiment:   prevRow?.sentiment    ?? 0,
+      };
+      fetchedAny = true;
+    } catch {
+      results[asset] = empty;
+    }
+  }));
+
+  // Save to cache if we successfully fetched data
+  if (fetchedAny) {
+    try {
+      await fs.writeFile(LUNARCRUSH_CACHE_FILE, JSON.stringify({
+        timestamp: Date.now(),
+        data: results
+      }, null, 2));
+    } catch (e) {
+      console.error("Failed to write LunarCrush cache:", e);
+    }
+  }
+
+  return results;
 }
 
 // ── Main exports ──────────────────────────────────────────────────────────────
 
 export async function getLivePortfolioData() {
-  const [state, history] = await Promise.all([
+  const [state, history, lunarCrush, optData] = await Promise.all([
     readJson<any>(STATE_FILE,   {}),
     readJson<any[]>(HISTORY_FILE, []),
+    getLunarCrushData(),
+    readJson<any>(OPTIMIZED_DATA_FILE, {}),
   ]);
 
   const currentPosition   = asString(state?.current_position, "CASH");
@@ -249,25 +460,31 @@ export async function getLivePortfolioData() {
   // so we defer them — placeholder values here, overridden after BTC qty calc
   const totalWealthReturnPct = ((totalWealthUsd - fixedCapital) / fixedCapital) * 100;
   const regimeConf        = toNumber(state?.market_data?.BTC?.regime_conf, 0);
-
-  // ── BTC quantity-based unrealised P&L ────────────────────────────────────
-  // User holds 1.0004 BTC. Unrealised P&L = qty × (currentPrice − entryPrice)
-  const BTC_QUANTITY      = 1.0004;
-  const mktDataForPnl     = state?.market_data ?? {};
+  const mktData           = state?.market_data ?? {};
+  // ── Position-unit-based unrealised P&L ─────────────────────────────────────
+  // positionUnits = how many units of the current asset were bought with portfolioValue
+  // e.g. if portfolioValue=$67,428 and DOGE entry=$0.1078 → positionUnits=625,490 DOGE
+  // This works for BTC, DOGE, SOL, ETH or any other asset.
   const currentAssetPrice = currentPosition !== "CASH"
-    ? toNumber(mktDataForPnl?.[currentPosition]?.price, 0)
+    ? toNumber(mktData?.[currentPosition]?.price, 0)
+    : 0;
+  // positionUnits: derived from the portfolio value at entry divided by the entry price.
+  // portfolioValue here is the value AT THE TIME OF ENTRY (stored by bull_rotate.py).
+  // We use it as the cost basis to compute how many units were purchased.
+  const positionUnits     = currentPosition !== "CASH" && entryPrice > 0
+    ? portfolioValue / entryPrice
     : 0;
   const unrealisedPnlUsd  = currentPosition !== "CASH" && entryPrice > 0 && currentAssetPrice > 0
-    ? BTC_QUANTITY * (currentAssetPrice - entryPrice)
+    ? positionUnits * (currentAssetPrice - entryPrice)
     : 0;
   const unrealisedPnlPct  = entryPrice > 0
     ? ((currentAssetPrice - entryPrice) / entryPrice) * 100
     : 0;
   // ── currentPositionValueUsd ────────────────────────────────────────────────
-  // When IN a position: 1.0004 BTC × current asset price
+  // When IN a position: positionUnits × current asset price (mark-to-market)
   // When IN CASH: use the portfolio_value_usd from the state file (cash value at exit)
-  const currentPositionValueUsd = currentPosition !== "CASH" && currentAssetPrice > 0
-    ? BTC_QUANTITY * currentAssetPrice
+  const currentPositionValueUsd = currentPosition !== "CASH" && currentAssetPrice > 0 && positionUnits > 0
+    ? positionUnits * currentAssetPrice
     : portfolioValue;   // portfolioValue = cash held after exit
 
   // Total Wealth = currentPositionValueUsd + reserveUsd
@@ -284,21 +501,31 @@ export async function getLivePortfolioData() {
   // the subsequent exit to compute the realised P&L of the previous trade.
   const sortedHistory = Array.isArray(history) ? [...history] : [];
   // History is stored oldest-first; find the last ENTRY before the current one
-  const exitActions = ["CRASH_EXIT", "STOP_CASH", "STOP_TO_BTC", "ROTATE", "WYCKOFF_DIST_EXIT_TO_CASH", "WYCKOFF_DIST_EXIT_TO_BTC"];
+  const exitActions = ["CRASH_EXIT", "STOP_CASH", "STOP_TO_BTC", "ROTATE", "WYCKOFF_DIST_EXIT_TO_CASH", "WYCKOFF_DIST_EXIT_TO_BTC", "REGIME_EXIT", "MSB_EXIT", "MSB_ENTRY_BTC", "REENTER_BTC", "MSB_ENTRY"];
   const lastExitRecord = sortedHistory.filter(r => exitActions.includes(asString(r.action, ""))).slice(-1)[0] ?? null;
   const prevTradeAction   = lastExitRecord ? asString(lastExitRecord.action, "") : "";
   const prevTradeDate     = lastExitRecord ? asString(lastExitRecord.date, "") : "";
   const prevTradePosition = lastExitRecord ? asString(lastExitRecord.position, "") : "";
   // Estimate previous trade P&L from portfolio value delta around the exit
   const prevTradePortfolioValue = lastExitRecord ? toNumber(lastExitRecord.portfolio_value, 0) : 0;
-  const regimeLabel       = regimeConf >= 65 ? "Range-Bound" : regimeConf >= 45 ? "Transitioning" : "Trending";
-  const regimeTone        = regimeConf >= 65 ? "warn" : regimeConf >= 45 ? "neutral" : "good";
+  // v4.0: regime label based on BTC 30d momentum (bull/bear), not just choppiness
+  const btcMom30          = toNumber(state?.market_data?.BTC?.mom_30, 0);
+  const msbWaiting        = Boolean(state?.msb_waiting ?? false);
+  const msbWaitDays       = toNumber(state?.msb_wait_days, 0);
+  const strategyVersion   = asString(state?.strategy_version, "v3.0");
+  // Build TFR scores from market_data
+  const tfrScores: Record<string, number> = {};
+  for (const [asset, data] of Object.entries(mktData) as [string, any][]) {
+    tfrScores[asset] = toNumber((data as any)?.tfr_score, 0);
+  }
+  const btcTfr            = tfrScores["BTC"] ?? 0;
+  const regimeLabel       = btcMom30 > 0 ? "BULLISH" : btcMom30 < -0.2 ? "BEARISH" : "NEUTRAL";
+  const regimeTone        = btcMom30 > 0 ? "good" : btcMom30 < -0.2 ? "danger" : "warn";
 
   const readiness         = deriveReadiness(state, history);
-  const ranking           = buildRanking(state);
-  const cashRisk          = buildCashRisk(state);
+  const ranking           = buildRanking(state, lunarCrush);
+  const cashRisk          = buildCashRisk(state, optData);
 
-  const mktData           = state?.market_data ?? {};
   const btcScore          = toNumber(mktData?.BTC?.score, 0);
   const topCandidates     = ranking.map(r => ({ asset: r.asset, symbol: r.asset, score: r.score }));
 
@@ -326,7 +553,7 @@ export async function getLivePortfolioData() {
       root:       DASHBOARD_ROOT,
       stateFile:  STATE_FILE,
       historyFile: HISTORY_FILE,
-      strategy:   "BULL_ROTATE v2.0",
+      strategy:   "BULL_ROTATE v4.1",
     },
     summary: {
       fixedCapitalUsd:            fixedCapital,
@@ -350,16 +577,43 @@ export async function getLivePortfolioData() {
       regimeTone,
       regimeConfidence:           readiness.label,
       confidenceLabel:            readiness.label,
+      btcMom30,
+      msbWaiting,
+      msbWaitDays,
+      msbWaitLimit:               toNumber(optData?.current_state?.msb_wait_limit, 5),
+      strategyVersion,
+      tfrScores,
+      btcTfr,
+      // v4.1 optimized_strategy_data fields (optional — populated after first cron run)
+      btcBreakoutLevel:           toNumber(optData?.rules_status?.rule_6_entry?.btc_breakout_level, 0),
+      ethBreakoutLevel:           toNumber(optData?.rules_status?.rule_6_entry?.eth_breakout_level, 0),
+      btcDistancePct:             toNumber(optData?.rules_status?.rule_6_entry?.btc_distance_pct, 0),
+      fallbackInDays:             toNumber(optData?.rules_status?.rule_6_entry?.fallback_in_days, 0),
+      predictedAction:            asString(optData?.next_action_forecast?.predicted_action, ""),
+      predictedReason:            asString(optData?.next_action_forecast?.predicted_reason, ""),
+      triggerConditions:          Array.isArray(optData?.next_action_forecast?.trigger_conditions) ? optData.next_action_forecast.trigger_conditions : [] as Array<{label: string; probability: string}>,
+      leaderAsset:                asString(optData?.scores?.leader, ""),
+      leadOverBtc:                toNumber(optData?.scores?.lead_over_btc, 0),
+      rotThreshold:               toNumber(optData?.parameters?.tfr_rotation_threshold, 1.5),
+      minHoldDays:                toNumber(optData?.parameters?.min_hold_days, 7),
+      // ── full passthrough blocks the server previously dropped (raw, 1:1, empty-object fallback) ──
+      leaderScore:                toNumber(optData?.scores?.leader_score, 0),
+      allAssetScores:             optData?.scores?.all_assets   ?? {},
+      btcHealth:                  optData?.btc_health           ?? {},
+      rulesStatus:                optData?.rules_status         ?? {},
+      entryStatus:                optData?.rules_status?.rule_6_entry ?? {},
+      strategyParameters:         optData?.parameters           ?? {},
+      scriptPerformance:          optData?.performance          ?? {},
     },
     performance: {
       btcHoldValueUsd:     0,  // populated by script if tracking BTC benchmark
       outperformanceUsd:   0,
       outperformancePct:   0,
-      // Correct unrealised P&L: based on 1.0004 BTC qty × (currentPrice − entryPrice)
+      // Unrealised P&L: positionUnits × (currentPrice − entryPrice)
       unrealisedPnlUsd,
       unrealisedPnlPct,
       currentPositionValueUsd,
-      btcQuantity:         BTC_QUANTITY,
+      positionUnits,
       currentAssetPrice,
       // Previous completed trade
       lastTrade: {
@@ -447,7 +701,8 @@ export async function getMsbSignals() {
   const tradeAlerts = Object.entries(rawAlerts).map(([asset, d]: [string, any]) => ({
     asset,
     signal:           asString(d?.signal, "RANGING"),
-    price:            toNumber(d?.price, 0),
+    // Fallback: if price is 0 in trade_alerts, use current_price from assets section
+    price:            toNumber(d?.price, 0) || toNumber(assets[asset]?.current_price, 0),
     atr:              d?.atr != null ? toNumber(d.atr, 0) : null,
     // BUY trigger
     buyTrigger:       d?.buy_trigger       != null ? toNumber(d.buy_trigger, 0)       : null,
@@ -475,6 +730,58 @@ export async function getMsbSignals() {
   };
 }
 
+
+// ── Squeeze Scanner export ────────────────────────────────────────────────────
+const SQUEEZE_FILE = path.join(DASHBOARD_ROOT, "squeeze_candidates.json");
+
+export async function getSqueezeData() {
+  const raw = await readJson<any>(SQUEEZE_FILE, null);
+  if (!raw) {
+    return {
+      available: false,
+      lastUpdated: null,
+      symbolsScanned: 0,
+      candidatesFound: 0,
+      minConfidence: 45,
+      nextScanHours: 8,
+      candidates: [],
+    };
+  }
+  const candidates = (raw.candidates ?? []).slice(0, 3).map((c: any) => ({
+    symbol:   String(c.symbol ?? ""),
+    base:     String(c.base ?? c.symbol?.replace("USDT","") ?? ""),
+    price:    Number(c.price ?? 0),
+    score:    Number(c.score ?? 0),
+    confidence: Number(c.confidence ?? c.score ?? 0),
+    components: {
+      fundingNegativity: Number(c.components?.funding_negativity ?? 0),
+      oiBuild:           Number(c.components?.oi_build ?? 0),
+      smartMoneyLong:    Number(c.components?.smart_money_long ?? 0),
+      priceStructure:    Number(c.components?.price_structure ?? 0),
+    },
+    raw: {
+      fundingLast:       Number(c.raw?.funding_last ?? 0),
+      fundingCum3p:      Number(c.raw?.funding_cumulative_3p ?? 0),
+      fundingNegStreak:  Number(c.raw?.funding_neg_streak ?? 0),
+      oiUsd:             Number(c.raw?.oi_usd ?? 0),
+      oiChange5dPct:     Number(c.raw?.oi_change_5d_pct ?? 0),
+      lsRatio:           c.raw?.ls_ratio != null ? Number(c.raw.ls_ratio) : null,
+      lsLongsPct:        c.raw?.ls_longs_pct != null ? Number(c.raw.ls_longs_pct) : null,
+      priceVsEma20:      c.raw?.price_vs_ema20 != null ? Number(c.raw.price_vs_ema20) : null,
+      atrPct:            c.raw?.atr_pct != null ? Number(c.raw.atr_pct) : null,
+    },
+  }));
+  return {
+    available: true,
+    lastUpdated:      String(raw.last_updated ?? ""),
+    symbolsScanned:   Number(raw.symbols_scanned ?? 0),
+    candidatesFound:  Number(raw.candidates_found ?? 0),
+    minConfidence:    Number(raw.min_confidence_threshold ?? 45),
+    nextScanHours:    Number(raw.next_scan_hours ?? 8),
+    candidates,
+  };
+}
+
 export async function getLiveDashboardData() {
   const snapshot = await getLivePortfolioData();
   const { summary, preparation, planning, cashRisk, ranking, tradeHistory } = snapshot;
@@ -499,6 +806,24 @@ export async function getLiveDashboardData() {
         reserveUsd:                 summary.reserveUsd,
         totalWealthUsd:             summary.totalWealthUsd,
         totalWealthReturnPct:       summary.totalWealthReturnPct,
+        // v4.1 fields
+        btcMom30:                   summary.btcMom30,
+        msbWaiting:                 summary.msbWaiting,
+        msbWaitDays:                summary.msbWaitDays,
+        msbWaitLimit:               summary.msbWaitLimit,
+        btcBreakoutLevel:           summary.btcBreakoutLevel,
+        ethBreakoutLevel:           summary.ethBreakoutLevel,
+        btcDistancePct:             summary.btcDistancePct,
+        fallbackInDays:             summary.fallbackInDays,
+        predictedAction:            summary.predictedAction,
+        predictedReason:            summary.predictedReason,
+        triggerConditions:          summary.triggerConditions,
+        leaderAsset:                summary.leaderAsset,
+        leadOverBtc:                summary.leadOverBtc,
+        rotThreshold:               summary.rotThreshold,
+        minHoldDays:                summary.minHoldDays,
+        tfrScores:                  summary.tfrScores,
+        btcTfr:                     summary.btcTfr,
       },
       performance: snapshot.performance,
       preparation,
@@ -509,7 +834,7 @@ export async function getLiveDashboardData() {
     },
     forecast: {
       generatedAtUtc:   summary.lastUpdate,
-      sourceMode:       "bull_rotate_v2",
+      sourceMode:       "bull_rotate_v4.1",
       currentPosition: {
         asset:            summary.currentAsset,
         allocation:       summary.currentAsset === "CASH" ? 0 : 1,
