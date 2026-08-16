@@ -148,35 +148,6 @@ function deriveReadiness(state: any, history: any[]): {
     };
   }
 
-  // v4.0: use TFR scores for rotation readiness (threshold = 1.5 points)
-  const mktDataForTfr = state?.market_data ?? {};
-  const btcTfrLocal = toNumber((mktDataForTfr?.BTC as any)?.tfr_score, 0);
-  let bestAltTfr = "";
-  let bestAltTfrScore = -Infinity;
-  for (const [asset, data] of Object.entries(mktDataForTfr) as [string, any][]) {
-    if (asset !== "BTC") {
-      const tfrScore = toNumber((data as any)?.tfr_score, 0);
-      if (tfrScore > bestAltTfrScore) { bestAltTfrScore = tfrScore; bestAltTfr = asset; }
-    }
-  }
-  const tfrLead = bestAltTfrScore - btcTfrLocal;
-  const TFR_THRESHOLD = 1.5;
-  if (bestAltTfr && tfrLead >= TFR_THRESHOLD) {
-    return {
-      status: "ROTATE_READY",
-      label: "Rotation Signal Active",
-      note: `${bestAltTfr} TFR score (${bestAltTfrScore.toFixed(3)}) leads BTC (${btcTfrLocal.toFixed(3)}) by +${tfrLead.toFixed(3)} — rotation threshold of ${TFR_THRESHOLD} exceeded.`,
-      blocker: null,
-    };
-  }
-  if (bestAltTfr && tfrLead > 0.8) {
-    return {
-      status: "WATCH",
-      label: "Building",
-      note: `${bestAltTfr} TFR score (${bestAltTfrScore.toFixed(3)}) is building — leads BTC by +${tfrLead.toFixed(3)}. Needs +${(TFR_THRESHOLD - tfrLead).toFixed(3)} more to trigger rotation.`,
-      blocker: `${bestAltTfr} needs +${(TFR_THRESHOLD - tfrLead).toFixed(3)} more TFR lead over BTC.`,
-    };
-  }
   if (bestAlt && altLead >= 30) {
     return {
       status: "ROTATE_READY",
@@ -196,7 +167,7 @@ function deriveReadiness(state: any, history: any[]): {
   return {
     status: "HOLD",
     label: "Holding",
-    note: btcMom30Local > 0 ? `Holding ${position} — BTC is strongest asset. ${bestAltTfr ? `${bestAltTfr} leads BTC TFR by +${tfrLead.toFixed(2)} pts (need 1.5 to rotate).` : "No rotation signal."}` : `Holding ${position} — BTC 30d momentum ${btcMom30Local.toFixed(1)}%.`,
+    note: btcMom30Local > 0 ? `Holding ${position} — BTC is strongest asset. ${bestAlt ? `${bestAlt} leads BTC composite by +${altLead.toFixed(1)} pts (need 30 to rotate).` : "No rotation signal."}` : `Holding ${position} — BTC 30d momentum ${btcMom30Local.toFixed(1)}%.`,
     blocker: null,
   };
 }
@@ -225,7 +196,7 @@ function buildRanking(state: any, lc?: Record<string, any>): Array<{ asset: stri
         trend:           lcData.trend ?? "",
       };
     })
-    .sort((a, b) => (b.tfrScore || b.score) - (a.tfrScore || a.score));
+    .sort((a, b) => b.score - a.score);
 }
 
 // ── Build cash risk monitor data ──────────────────────────────────────────────
