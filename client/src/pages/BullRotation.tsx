@@ -554,11 +554,11 @@ export default function BullRotation() {
             <Card>
               <h3 className="mb-2 text-sm font-semibold">How Bull Rotation works</h3>
               <p className="text-sm text-muted-foreground">{data?.learning?.strategy_overview}</p>
-              {Array.isArray(data?.learning?.tfr_components) && (
+              {Array.isArray(data?.learning?.rotation_components) && (
                 <div className="mt-4">
-                  <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">TFR rotation score — 7 components</div>
+                  <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Rotation score — momentum composite</div>
                   <div className="flex flex-wrap gap-2">
-                    {data!.learning.tfr_components.map((c: string, i: number) => (
+                    {data!.learning.rotation_components.map((c: string, i: number) => (
                       <span key={i} className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">{c}</span>
                     ))}
                   </div>
@@ -628,7 +628,7 @@ export default function BullRotation() {
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{d.message}</p>
                   <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-                    <div><div className="text-xs text-muted-foreground">Live (v4) return</div><div className="font-medium">{fmtPct(d.live_full?.return_pct, 0)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">Live (v5) return</div><div className="font-medium">{fmtPct(d.live_full?.return_pct, 0)}</div></div>
                     <div><div className="text-xs text-muted-foreground">Live Sharpe</div><div className="font-medium">{d.live_full?.sharpe}</div></div>
                     <div><div className="text-xs text-muted-foreground">Live max DD</div><div className="font-medium">{fmtPct(d.live_full?.max_drawdown_pct, 0)}</div></div>
                     <div><div className="text-xs text-muted-foreground">Recent window Sharpe</div><div className="font-medium">{d.recent_window_sharpe}</div></div>
