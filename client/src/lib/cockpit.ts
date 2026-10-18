@@ -388,3 +388,15 @@ export const ACTION_LABELS: Record<string, string> = {
   MSB_EXIT: "Structure exit", CRASH_EXIT: "Crash exit",
 };
 export const actionLabel = (a: string | null | undefined) => (a ? ACTION_LABELS[a] ?? exitName(a) : "—");
+
+/** Per-viewer theme choice, shared by the Cockpit and the SMSF page. */
+export const THEME_KEY = "cockpit-theme";
+
+export function readTheme(): "light" | "dark" | null {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === "light" || t === "dark" ? t : null;
+  } catch {
+    return null;
+  }
+}

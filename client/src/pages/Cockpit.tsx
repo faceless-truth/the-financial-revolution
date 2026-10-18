@@ -1,7 +1,8 @@
 /**
  * Bull Rotation Cockpit, the public strategy dashboard at /bull-rotation.
  * ─────────────────────────────────────────────────────────────────────────────
- * Views switched by #hash: Overview · Performance · Trades · Learning · Scarton SMSF.
+ * Views switched by #hash: Overview · Performance · Trades · Learning.
+ * Scarton SMSF has its own page at /smsf; the old #smsf link redirects there.
  *
  * Public data: /api/bull-rotation (the Python-emitted dashboard payload).
  * Private data: /api/bybit/performance, requested only when the server-side
@@ -13,14 +14,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AccountPerformance, LearningTest, StrategyCurve } from "@shared/cockpit";
 import {
-  accountModel, choosePerformanceSource, deriveExits, isStale, longDate, overviewTitle, strategyModel,
+  accountModel, choosePerformanceSource, deriveExits, isStale, longDate, overviewTitle, readTheme, strategyModel, THEME_KEY,
   type CockpitForecast, type CockpitParams, type CockpitStatus, type SessionState,
 } from "@/lib/cockpit";
 import {
   ChangeTiles, LearningView, PerformanceView, PositionCard, RotationWatch, StatusStrip, TradesView,
   WaitingForEntry, WhatEndsThisTrade, type TradesPayload,
 } from "@/components/cockpit/CockpitViews";
-import { SmsfView } from "@/components/cockpit/SmsfView";
 import "./cockpit.css";
 import { useOwner } from "@/components/OwnerGate";
 
@@ -37,33 +37,24 @@ interface Payload {
   learning_tests?: LearningTest[] | null;
 }
 
-type View = "overview" | "performance" | "trades" | "learning" | "smsf";
-const VIEWS: View[] = ["overview", "performance", "trades", "learning", "smsf"];
+type View = "overview" | "performance" | "trades" | "learning";
+const VIEWS: View[] = ["overview", "performance", "trades", "learning"];
 const POLL_MS = 5 * 60 * 1000;
 const PRIVATE_REQUEST = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } } as const;
-const THEME_KEY = "cockpit-theme";
 
 const viewFromHash = (): View => {
   const h = typeof window === "undefined" ? "" : window.location.hash.slice(1);
   return (VIEWS as string[]).includes(h) ? (h as View) : "overview";
 };
 
-function readTheme(): "light" | "dark" | null {
-  try {
-    const t = localStorage.getItem(THEME_KEY);
-    return t === "light" || t === "dark" ? t : null;
-  } catch {
-    return null;
-  }
-}
-
 const NAV: { v: View; label: string; icon: ReactNode }[] = [
   { v: "overview", label: "Overview", icon: <svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></svg> },
   { v: "performance", label: "Performance", icon: <svg viewBox="0 0 16 16"><path d="M2 13l4-5 3 3 5-7" /></svg> },
   { v: "trades", label: "Trades", icon: <svg viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12" /></svg> },
   { v: "learning", label: "Learning", icon: <svg viewBox="0 0 16 16"><path d="M5 2v5L2 13a1 1 0 001 1h10a1 1 0 001-1l-3-6V2M4 2h8" /></svg> },
-  { v: "smsf", label: "Scarton SMSF", icon: <svg viewBox="0 0 16 16"><path d="M2 7l6-4 6 4M3 7v6h10V7M6 13V9h4v4" /></svg> },
 ];
+
+const SMSF_ICON = <svg viewBox="0 0 16 16"><path d="M2 7l6-4 6 4M3 7v6h10V7M6 13V9h4v4" /></svg>;
 
 export default function Cockpit() {
   const { signOut } = useOwner();
@@ -77,6 +68,11 @@ export default function Cockpit() {
   const [theme, setTheme] = useState<"light" | "dark" | null>(readTheme);
 
   useEffect(() => { document.title = "Bull Rotation Cockpit"; }, []);
+
+  // The SMSF view moved to its own page; keep old #smsf links working.
+  useEffect(() => {
+    if (window.location.hash === "#smsf") window.location.replace("/smsf");
+  }, []);
 
   useEffect(() => {
     const onHash = () => { setView(viewFromHash()); window.scrollTo({ top: 0 }); };
@@ -178,6 +174,7 @@ export default function Cockpit() {
             {NAV.map(n => (
               <a key={n.v} href={`#${n.v}`} aria-current={view === n.v ? "page" : undefined}>{n.icon}{n.label}</a>
             ))}
+            <a href="/smsf">{SMSF_ICON}Scarton SMSF</a>
           </nav>
           <div className="side-foot">
             <span><i className="dot" style={stale ? { background: "var(--warn)" } : undefined} />Daily run 00:05 UTC</span>
@@ -188,9 +185,7 @@ export default function Cockpit() {
         </aside>
 
         <main className="main">
-          {view === "smsf" ? (
-            <SmsfView />
-          ) : loading && !data ? (
+          {loading && !data ? (
             <div className="state"><b>Loading the latest decision…</b>Reading today's strategy snapshot.</div>
           ) : !data?.available ? (
             <div className="state">

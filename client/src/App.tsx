@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Portfolio from "./pages/Portfolio";
 import Cockpit from "./pages/Cockpit";
+import Smsf from "./pages/Smsf";
 import OwnerGate from "./components/OwnerGate";
 
 
@@ -15,6 +16,7 @@ function Router() {
     <Switch>
       <Route path={"/"}><Redirect to="/bull-rotation" /></Route>
       <Route path={"/bull-rotation"} component={Cockpit} />
+      <Route path={"/smsf"} component={Smsf} />
       <Route path={"/portfolio"} component={Portfolio} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
