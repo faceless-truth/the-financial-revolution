@@ -8,13 +8,18 @@
  *   • History tab   — the permanent record: Bull Rotation's completed trades,
  *     the 4h scalp tracker's trades, and the full daily decision log both are
  *     derived from (the same decisions that go out over Telegram).
- *   • Learning tab  — how the strategy works + the weekly self-reflection slot.
+ *   • Learning tab  — how the strategy works + live parameters.
+ *   • Testing tab   — the independently published, paired paper comparison.
  *
  * Display-only. Every value comes from the emitted payload; nothing here feeds
  * back into a trade decision.
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "wouter";
+import PaperComparison from "@/components/PaperComparison";
+import CandidateWatch from "@/components/CandidateWatch";
+import type { CandidateWatchPayload } from "@shared/candidateWatch";
+import type { PaperComparisonPayload } from "@shared/paperComparison";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -56,6 +61,8 @@ interface Payload {
   trades: TradeRecord;
   scalp: ScalpRecord;
   learning: any;
+  candidate_watch?: CandidateWatchPayload | null;
+  paper_comparison?: PaperComparisonPayload | null;
   available: boolean;
 }
 
@@ -216,6 +223,7 @@ export default function BullRotation() {
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
             <TabsTrigger value="learning">Learning</TabsTrigger>
+            <TabsTrigger value="testing">Testing</TabsTrigger>
           </TabsList>
 
           {/* ── DASHBOARD ─────────────────────────────────────────────── */}
@@ -577,133 +585,11 @@ export default function BullRotation() {
                 ))}
               </div>
             </Card>
+          </TabsContent>
 
-            {/* Paper (shadow) strategies */}
-            {data?.learning?.paper_trading?.candidates && (
-              <Card>
-                <h3 className="mb-1 text-sm font-semibold">Paper (shadow) strategies</h3>
-                <p className="mb-3 text-sm text-muted-foreground">{data.learning.paper_trading.note}</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <th className="py-2 pr-3">Strategy</th><th className="py-2 pr-3">Position</th>
-                        <th className="py-2 pr-3 text-right">Paper value</th><th className="py-2 pr-3 text-right">Return</th>
-                        <th className="py-2 pr-3 text-right">vs live</th><th className="py-2 text-right">Days</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.learning.paper_trading.candidates.map((c: any, i: number) => (
-                        <tr key={i} className="border-b border-border/40 last:border-0">
-                          <td className="py-2 pr-3"><span className="font-medium">{c.name}</span><div className="text-xs text-muted-foreground">{c.description}</div></td>
-                          <td className="py-2 pr-3" style={{ color: ASSET_COLORS[c.position] ?? ASSET_COLORS.CASH }}>{c.position}</td>
-                          <td className="py-2 pr-3 text-right">{fmtUsd(c.paper_value)}</td>
-                          <td className="py-2 pr-3 text-right">{fmtPct(c.return_pct)}</td>
-                          <td className={`py-2 pr-3 text-right ${c.name === "live-v4" ? "text-muted-foreground" : (c.excess_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                            {c.name === "live-v4" ? "—" : fmtPct(c.excess_return_pct)}
-                          </td>
-                          <td className="py-2 text-right text-muted-foreground">{c.days_running}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            )}
-
-            {/* Strategy health / decay flag */}
-            {data?.learning?.decay && (() => {
-              const d = data.learning.decay;
-              const toneMap: Record<string, { card: string; dot: string }> = {
-                green: { card: "border-emerald-500/40 bg-emerald-500/5", dot: "bg-emerald-400" },
-                amber: { card: "border-amber-500/40 bg-amber-500/5", dot: "bg-amber-400" },
-                red: { card: "border-rose-500/40 bg-rose-500/5", dot: "bg-rose-400" },
-              };
-              const t = toneMap[d.flag] ?? toneMap.red;
-              return (
-                <Card className={t.card}>
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${t.dot}`} />
-                    <h3 className="text-sm font-semibold">Strategy health — decay flag: {String(d.flag).toUpperCase()}</h3>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">{d.message}</p>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-                    <div><div className="text-xs text-muted-foreground">Live (v5) return</div><div className="font-medium">{fmtPct(d.live_full?.return_pct, 0)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Live Sharpe</div><div className="font-medium">{d.live_full?.sharpe}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Live max DD</div><div className="font-medium">{fmtPct(d.live_full?.max_drawdown_pct, 0)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Recent window Sharpe</div><div className="font-medium">{d.recent_window_sharpe}</div></div>
-                  </div>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Backtest basis over {d.data_window?.start} → {d.data_window?.end}. Per-window OOS Sharpe: {(d.window_sharpe ?? []).join(", ")}.
-                  </p>
-                </Card>
-              );
-            })()}
-
-            {/* Weekly self-reflection */}
-            <Card>
-              <h3 className="mb-2 text-sm font-semibold">Weekly self-reflection</h3>
-              {data?.learning?.weekly_reflection ? (() => {
-                const w = data.learning.weekly_reflection;
-                const vColor: Record<string, string> = { PROMOTE_PAPER: "text-emerald-400", INCONCLUSIVE: "text-amber-400", REJECT: "text-rose-400" };
-                return (
-                  <div className="space-y-4">
-                    <div className="text-xs text-muted-foreground">Week of {w.week_of}</div>
-                    <p className="text-sm">{w.reflection}</p>
-                    {Array.isArray(w.candidates_tested) && w.candidates_tested.length > 0 && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-[560px] text-sm">
-                          <thead>
-                            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                              <th className="py-2 pr-3">Candidate</th><th className="py-2 pr-3">Verdict</th>
-                              <th className="py-2 pr-3 text-right">Return</th><th className="py-2 pr-3 text-right">vs live</th>
-                              <th className="py-2 pr-3 text-right">Win%</th><th className="py-2 pr-3 text-right">PSR</th><th className="py-2 text-right">DSR</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {w.candidates_tested.map((c: any, i: number) => (
-                              <tr key={i} className="border-b border-border/40 last:border-0">
-                                <td className="py-2 pr-3 font-medium">{c.name}</td>
-                                <td className={`py-2 pr-3 font-medium ${vColor[c.verdict] ?? ""}`}>{c.verdict}</td>
-                                <td className="py-2 pr-3 text-right">{fmtPct(c.candidate_return_pct, 0)}</td>
-                                <td className={`py-2 pr-3 text-right ${(c.candidate_return_pct ?? 0) - (c.live_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                                  {c.candidate_return_pct == null || c.live_return_pct == null ? "—" : fmtPct(c.candidate_return_pct - c.live_return_pct, 0)}
-                                </td>
-                                <td className="py-2 pr-3 text-right">{Math.round((c.win_fraction ?? 0) * 100)}%</td>
-                                <td className="py-2 pr-3 text-right">{c.psr}</td>
-                                <td className="py-2 text-right">{c.dsr}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    {w.recommendation && (
-                      <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
-                        <span className="font-semibold">Recommendation: </span>{w.recommendation}
-                      </div>
-                    )}
-                    {Array.isArray(w.backlog_ideas) && (
-                      <div>
-                        <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Idea backlog (need engine features)</div>
-                        <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                          {w.backlog_ideas.map((b: string, i: number) => <li key={i}>{b}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      Promotion is advisory — "promote" means shadow-trade and validate forward, never auto-deploy to live capital.
-                    </p>
-                  </div>
-                );
-              })() : (
-                <p className="text-sm text-muted-foreground">
-                  The adaptive research loop will post a weekly scorecard here — what worked,
-                  what didn't, the decay flag on the live edge, and any candidate upgrades
-                  being back-tested against the current strategy before promotion.
-                </p>
-              )}
-            </Card>
+          <TabsContent value="testing" className="space-y-6">
+            <CandidateWatch data={data?.candidate_watch} />
+            <PaperComparison data={data?.paper_comparison} />
           </TabsContent>
         </Tabs>
 

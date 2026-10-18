@@ -150,10 +150,16 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+// Private account pages must never include session/network replay collectors.
+// Development diagnostics are explicit opt-in and always excluded from builds.
+const plugins = (command: string) => [react(), tailwindcss(),
+  ...(command === "serve" && process.env.TFR_ENABLE_BROWSER_DIAGNOSTICS === "1"
+    ? [jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()]
+    : []),
+];
 
-export default defineConfig({
-  plugins,
+export default defineConfig(({ command }) => ({
+  plugins: plugins(command),
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
@@ -190,4 +196,4 @@ export default defineConfig({
       deny: ["**/.*"],
     },
   },
-});
+}));

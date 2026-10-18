@@ -18,11 +18,15 @@
 
 import fs from "fs/promises";
 import path from "path";
+import type { PaperComparisonPayload } from "../shared/paperComparison";
 
 const DASHBOARD_ROOT = process.env.CRYPTO_DASHBOARD_ROOT ?? "/root/crypto_dashboard";
 const PAYLOAD_FILE =
   process.env.BULL_ROTATION_PAYLOAD_FILE ??
   path.join(DASHBOARD_ROOT, "data", "public", "dashboard_payload.json");
+const PAPER_COMPARISON_FILE =
+  process.env.PROFIT_TRAIL_COMPARISON_FILE ??
+  path.join(DASHBOARD_ROOT, "data", "public", "profit_trail_comparison.json");
 
 export interface BtcClose {
   date: string;
@@ -54,6 +58,7 @@ export interface BullRotationPayload {
   trades: TradeRecord;
   scalp: ScalpRecord;
   learning: Record<string, any>;
+  paper_comparison: PaperComparisonPayload | null;
   available: boolean;
 }
 
@@ -83,7 +88,7 @@ export interface ScalpRecord {
 const EMPTY: BullRotationPayload = {
   generated_at: null,
   as_of_date: null,
-  strategy_version: "v4.1",
+  strategy_version: "Unavailable",
   btc_7d: [],
   btc_7d_source: "none",
   status: {},
@@ -100,15 +105,36 @@ const EMPTY: BullRotationPayload = {
     first_date: null, last_date: null,
   },
   learning: {},
+  paper_comparison: null,
   available: false,
 };
 
+async function getPaperComparison(): Promise<PaperComparisonPayload | null> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(PAPER_COMPARISON_FILE, "utf8"));
+    if (!parsed || parsed.schema_version !== 1 || parsed.paper_only !== true ||
+        parsed.candidate_promoted !== false || typeof parsed.available !== "boolean" ||
+        !parsed.accounts || Array.isArray(parsed.accounts) ||
+        !Array.isArray(parsed.series) || !Array.isArray(parsed.daily_history) ||
+        (parsed.available && (!parsed.accounts.control || !parsed.accounts.candidate))) {
+      return null;
+    }
+    return parsed as PaperComparisonPayload;
+  } catch {
+    return null;
+  }
+}
+
 export async function getBullRotationDashboard(): Promise<BullRotationPayload> {
+  // Paper publication follows the 00:15 paper job. Reading that independent
+  // artifact on every request avoids the main payload's same-minute cron race.
+  // Never substitute a legacy candidate book or calculate trading metrics here.
+  const paper_comparison = await getPaperComparison();
   try {
     const raw = await fs.readFile(PAYLOAD_FILE, "utf8");
     const parsed = JSON.parse(raw) as BullRotationPayload;
-    return { ...EMPTY, ...parsed, available: true };
+    return { ...EMPTY, ...parsed, paper_comparison, available: true };
   } catch {
-    return EMPTY;
+    return { ...EMPTY, paper_comparison };
   }
 }

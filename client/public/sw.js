@@ -1,7 +1,7 @@
 /* TFR Service Worker v3.1 — VAPID Web Push + offline caching
    V6: navigations are network-first so app upgrades show immediately; the
    version bump purges the old cache (which pinned a stale index.html). */
-const CACHE_NAME = "TFR_CACHE_V6";
+const CACHE_NAME = "TFR_CACHE_V7_PRIVATE_API_EXCLUDED";
 const TFR_ICON   = "https://d2xsxph8kpxj0f.cloudfront.net/310519663335455300/f7qptPGnBE9WgCNPQkiCv7/tfr-icon_467cb428.png";
 
 // ── Install: skip waiting immediately ────────────────────────────────────────
@@ -23,6 +23,16 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   if (!event.request.url.startsWith("http")) return;
 
+  const url = new URL(event.request.url);
+  let pathname = url.pathname.toLowerCase();
+  try { pathname = decodeURIComponent(pathname).toLowerCase(); } catch { /* malformed URLs remain network requests */ }
+  if (url.origin === self.location.origin && (pathname === "/api/bybit" || pathname.startsWith("/api/bybit/"))) {
+    // Private exchange data/session state: network only, no cache writes and
+    // no offline fallback that could reveal an account after logout.
+    event.respondWith(fetch(event.request, { cache: "no-store" }));
+    return;
+  }
+
   const isApiOrLive = event.request.url.includes("binance.com") || event.request.url.includes("/api/");
   const isNavigation = event.request.mode === "navigate";
 
@@ -32,7 +42,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (isNavigation && response && response.status === 200) {
+          if (isNavigation && response && response.status === 200 && !/private|no-store/i.test(response.headers.get("Cache-Control") || "")) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
@@ -47,7 +57,7 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        if (response && response.status === 200 && response.type === "basic") {
+        if (response && response.status === 200 && response.type === "basic" && !/private|no-store/i.test(response.headers.get("Cache-Control") || "")) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
