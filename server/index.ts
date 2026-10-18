@@ -5,6 +5,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { getLivePortfolioData, getLiveDashboardData, getMsbSignals, getSqueezeData } from "./livePortfolio";
 import { getBullRotationDashboard } from "./bullRotation";
+import { getSmsfDashboard } from "./smsf";
+import { createBybitClient } from "./bybitReadOnly";
+import { createBybitRouter, createSiteApiGate } from "./bybitRoutes";
 import {
   addSubscription,
   removeSubscription,
@@ -22,7 +25,42 @@ async function startServer() {
   const app    = express();
   const server = createServer(app);
 
-  // Parse JSON request bodies
+  // Only the local nginx proxy may supply HTTPS/client-address forwarding.
+  app.set("trust proxy", "loopback");
+  app.disable("x-powered-by");
+  app.use((_req, res, next) => {
+    res.setHeader("Referrer-Policy", "same-origin");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    // This is the deployed server entrypoint. Security must not depend on a
+    // PM2 wrapper having set NODE_ENV (the existing deployment may leave it unset).
+    res.setHeader("Content-Security-Policy", [
+        "default-src 'self'", "script-src 'self'", "object-src 'none'",
+        "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https://d2xsxph8kpxj0f.cloudfront.net",
+        "connect-src 'self' https://api.binance.com https://api.alternative.me",
+        "worker-src 'self' blob:", "manifest-src 'self'",
+    ].join("; "));
+    next();
+  });
+
+  // Private owner-authenticated, read-only account data. This router handles
+  // its own bounded JSON parser/errors BEFORE the public app parser or SPA.
+  // Construction is lazy: no credentials or Bybit requests before owner access.
+  const bybit = createBybitClient();
+  const owner = createBybitRouter({
+    getSnapshot: () => bybit.getSnapshot(),
+    getPortfolio: () => bybit.getPortfolio(),
+    getPerformance: () => bybit.getPerformance(),
+  });
+  app.use("/api/bybit", owner);
+
+  // Single site login: every other API route needs the same owner session.
+  app.use("/api", createSiteApiGate(owner.requireOwner));
+
+  // Parse JSON request bodies for the existing public strategy/push routes.
   app.use(express.json());
 
   // ── Portfolio data endpoints ────────────────────────────────────────────────
@@ -66,6 +104,7 @@ async function startServer() {
   app.get("/api/bull-rotation", async (_req, res) => {
     try {
       const data = await getBullRotationDashboard();
+      res.setHeader("Cache-Control", "no-store");
       res.json(data);
     } catch (error) {
       res.status(500).json({
@@ -73,6 +112,11 @@ async function startServer() {
         details: error instanceof Error ? error.message : String(error),
       });
     }
+  });
+
+  app.get("/api/smsf", async (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(await getSmsfDashboard());
   });
 
   app.get("/api/squeeze-data", async (_req, res) => {

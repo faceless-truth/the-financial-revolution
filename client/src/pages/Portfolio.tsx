@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { formatLargeNumber, formatPct, timeAgo } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
+import BybitAccount from "@/components/BybitAccount";
 import { Link } from "wouter";
 import {
   TrendingUp,
@@ -608,6 +609,7 @@ export default function Portfolio() {
       </header>
 
       <div className="container py-6 space-y-6">
+        <BybitAccount />
         {loading ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
         ) : !data || !summary ? (
