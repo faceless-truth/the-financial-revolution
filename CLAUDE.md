@@ -169,10 +169,12 @@ layout differs from a CASH layout.
 Factual and systematic. Label historical/backtest figures as such. No hype.
 This is a dashboard describing a live rule-based system, not marketing.
 
-## Scarton SMSF view (2026-10-18)
+## Scarton SMSF page (2026-10-18)
 
-Cockpit nav item `#smsf` (`client/src/components/cockpit/SmsfView.tsx`), shown
-even when the Bull Rotation payload is unavailable. The owner's SMSF at IBKR:
+Dedicated owner-gated page at `/smsf` (`client/src/pages/Smsf.tsx`, Cockpit
+shell around `client/src/components/cockpit/SmsfView.tsx`), independent of the
+Bull Rotation payload. The Cockpit sidebar links to it, and old
+`/bull-rotation#smsf` links redirect there. The owner's SMSF at IBKR:
 equal fifths of VT, TLT, GLDM, REET, IBIT, each timed monthly by price vs the
 mean of the last 252 unadjusted daily closes (sell on the last trading day if
 below; buy back on the first trading day if above; no cross-sleeve rebalance).
