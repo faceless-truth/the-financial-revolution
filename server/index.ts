@@ -121,7 +121,7 @@ async function startServer() {
 
   app.get("/api/smsf/report.pdf", (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.download(SMSF_REPORT_FILE, "Scarton-SMSF-Option-B-report.pdf", err => {
+    res.download(SMSF_REPORT_FILE, "Option-B-portfolio-report.pdf", err => {
       if (err && !res.headersSent) res.status(404).json({ error: "SMSF report not generated yet" });
     });
   });
