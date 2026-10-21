@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { getLivePortfolioData, getLiveDashboardData, getMsbSignals, getSqueezeData } from "./livePortfolio";
 import { getBullRotationDashboard } from "./bullRotation";
-import { getSmsfDashboard } from "./smsf";
+import { getSmsfDashboard, SMSF_REPORT_FILE } from "./smsf";
 import { createBybitClient } from "./bybitReadOnly";
 import { createBybitRouter, createSiteApiGate } from "./bybitRoutes";
 import {
@@ -117,6 +117,13 @@ async function startServer() {
   app.get("/api/smsf", async (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json(await getSmsfDashboard());
+  });
+
+  app.get("/api/smsf/report.pdf", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.download(SMSF_REPORT_FILE, "Option-B-portfolio-report.pdf", err => {
+      if (err && !res.headersSent) res.status(404).json({ error: "SMSF report not generated yet" });
+    });
   });
 
   app.get("/api/squeeze-data", async (_req, res) => {

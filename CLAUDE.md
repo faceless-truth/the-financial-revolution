@@ -169,10 +169,12 @@ layout differs from a CASH layout.
 Factual and systematic. Label historical/backtest figures as such. No hype.
 This is a dashboard describing a live rule-based system, not marketing.
 
-## Scarton SMSF view (2026-10-18)
+## Scarton SMSF page (2026-10-18)
 
-Cockpit nav item `#smsf` (`client/src/components/cockpit/SmsfView.tsx`), shown
-even when the Bull Rotation payload is unavailable. The owner's SMSF at IBKR:
+Dedicated owner-gated page at `/smsf` (`client/src/pages/Smsf.tsx`, Cockpit
+shell around `client/src/components/cockpit/SmsfView.tsx`), independent of the
+Bull Rotation payload. The Cockpit sidebar links to it, and old
+`/bull-rotation#smsf` links redirect there. The owner's SMSF at IBKR:
 equal fifths of VT, TLT, GLDM, REET, IBIT, each timed monthly by price vs the
 mean of the last 252 unadjusted daily closes (sell on the last trading day if
 below; buy back on the first trading day if above; no cross-sleeve rebalance).
@@ -182,6 +184,8 @@ below; buy back on the first trading day if above; no cross-sleeve rebalance).
   good file on failure. Tests: `tests/test_smsf_trend.py`.
 - `server/smsf.ts` → `GET /api/smsf` (pass-through, behind the owner login).
 - Backtest splices GLD before GLDM and BTC-USD (−0.25%/yr) before IBIT; cash = BIL.
+- PDF report: `scripts/smsf_report.py` (runs after `smsf_trend.py` in the same cron line) → `data/public/smsf_report.pdf`; page 1 = option B from `CHART_START` + today's model holdings, then one page per fund. Fund composition from Yahoo `funds_data`, cached in `data/smsf_fund_info.json`. Served by `GET /api/smsf/report.pdf` (behind the site login); "Download report (PDF)" button in the SMSF top bar.
+- The backtest chart (`backtest.curve`) is a fresh run from `CHART_START` (2024-01-01, user request 2026-10-21); the tables keep the full history.
 - Main rules = version B (`rule_rebalanced`): reset all to equal fifths at
   every buy-back; funds still below their average keep their fifth as cash.
 - Live forward test of A, B, hold-yearly, hold-never from the fixed start in

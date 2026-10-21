@@ -30,6 +30,7 @@ interface Backtest extends Record<VersionKey, Stats> {
   windows: StartWindow[];
   annual: ({ year: number } & Record<VersionKey, number>)[];
   curve: Curve;
+  curve_start_date?: string;
   recent_trades: Switch[];
 }
 interface ForwardEvent { date: string; kind: "buy" | "sell" | "reset"; ticker?: string; close?: number; average?: number }
@@ -101,6 +102,11 @@ export function SmsfView() {
         <p>Equal fifths, timed by 12-month averages, reset at each buy-back · held at Interactive Brokers
           {data?.as_of_date && <> · prices to the {longDate(data.as_of_date)} US close</>}</p>
       </div>
+      {data?.available && (
+        <a className="theme-btn" href="/api/smsf/report.pdf" download style={{ textDecoration: "none" }}>
+          Download report (PDF)
+        </a>
+      )}
     </div>
   );
 
@@ -301,7 +307,11 @@ function BacktestPanel({ bt }: { bt: Backtest }) {
         </table>
       </div>
 
-      <ValueChart curve={bt.curve} label="Backtest portfolio value for four versions, log scale" />
+      <h3 style={{ fontSize: 14, margin: "4px 0 4px" }}>From {longDate(bt.curve_start_date ?? bt.start_date)} to {longDate(bt.end_date)}</h3>
+      {bt.curve_start_date && bt.curve_start_date !== bt.start_date && (
+        <p className="note" style={{ marginBottom: 8 }}>The chart restarts all four versions at {formatUsd(bt.start_value)} in equal fifths on this date. The table above covers the full backtest.</p>
+      )}
+      <ValueChart curve={bt.curve} label={`Backtest portfolio value for four versions from ${longDate(bt.curve_start_date ?? bt.start_date)}, log scale`} />
 
       {bt.windows.length > 0 && <>
         <h3 style={{ fontSize: 14, margin: "18px 0 4px" }}>Does it depend on the start date?</h3>
