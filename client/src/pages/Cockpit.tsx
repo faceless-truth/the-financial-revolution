@@ -1,7 +1,9 @@
 /**
  * Bull Rotation Cockpit, the public strategy dashboard at /bull-rotation.
  * ─────────────────────────────────────────────────────────────────────────────
- * Views switched by #hash: Overview · Performance · Trades · Learning.
+ * Views switched by #hash: Overview · Performance · Trades · Learning · God List.
+ * God List: live coins' momentum from the latest decision (status.assets) plus
+ * the watchlist and selection profile from the payload's god_list block.
  * Scarton SMSF has its own page at /smsf; the old #smsf link redirects there.
  *
  * Public data: /api/bull-rotation (the Python-emitted dashboard payload).
@@ -18,8 +20,8 @@ import {
   type CockpitForecast, type CockpitParams, type CockpitStatus, type SessionState,
 } from "@/lib/cockpit";
 import {
-  ChangeTiles, LearningView, PerformanceView, PositionCard, RotationWatch, StatusStrip, TradesView,
-  WaitingForEntry, WhatEndsThisTrade, type TradesPayload,
+  ChangeTiles, GodListView, LearningView, PerformanceView, PositionCard, RotationWatch, StatusStrip, TradesView,
+  WaitingForEntry, WhatEndsThisTrade, type GodListPayload, type TradesPayload,
 } from "@/components/cockpit/CockpitViews";
 import "./cockpit.css";
 import { useOwner } from "@/components/OwnerGate";
@@ -35,10 +37,11 @@ interface Payload {
   trades: TradesPayload;
   strategy_curve?: StrategyCurve | null;
   learning_tests?: LearningTest[] | null;
+  god_list?: GodListPayload | null;
 }
 
-type View = "overview" | "performance" | "trades" | "learning";
-const VIEWS: View[] = ["overview", "performance", "trades", "learning"];
+type View = "overview" | "performance" | "trades" | "learning" | "god-list";
+const VIEWS: View[] = ["overview", "performance", "trades", "learning", "god-list"];
 const POLL_MS = 5 * 60 * 1000;
 const PRIVATE_REQUEST = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } } as const;
 
@@ -55,6 +58,7 @@ const NAV: { v: View; label: string; icon: ReactNode }[] = [
 ];
 
 const SMSF_ICON = <svg viewBox="0 0 16 16"><path d="M2 7l6-4 6 4M3 7v6h10V7M6 13V9h4v4" /></svg>;
+const GOD_LIST_ICON = <svg viewBox="0 0 16 16"><path d="M8 2l1.8 3.7 4 .6-2.9 2.8.7 4L8 11.2 4.4 13.1l.7-4-2.9-2.8 4-.6z" /></svg>;
 
 export default function Cockpit() {
   const { signOut } = useOwner();
@@ -175,6 +179,7 @@ export default function Cockpit() {
               <a key={n.v} href={`#${n.v}`} aria-current={view === n.v ? "page" : undefined}>{n.icon}{n.label}</a>
             ))}
             <a href="/smsf">{SMSF_ICON}Scarton SMSF</a>
+            <a href="#god-list" aria-current={view === "god-list" ? "page" : undefined}>{GOD_LIST_ICON}God List</a>
           </nav>
           <div className="side-foot">
             <span><i className="dot" style={stale ? { background: "var(--warn)" } : undefined} />Daily run 00:05 UTC</span>
@@ -220,6 +225,7 @@ export default function Cockpit() {
               {view === "performance" && <PerformanceView model={perfModel} notice={perfNotice} />}
               {view === "trades" && <TradesView trades={data.trades} />}
               {view === "learning" && <LearningView tests={data.learning_tests} />}
+              {view === "god-list" && <GodListView status={status} params={params} asOf={asOf} godList={data.god_list} />}
             </>
           )}
           <div className="mobile-foot">
