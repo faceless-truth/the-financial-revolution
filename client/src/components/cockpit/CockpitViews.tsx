@@ -322,6 +322,170 @@ export function RotationWatch({ status, params }: { status: CockpitStatus; param
   );
 }
 
+export interface GodListCoin {
+  status: "live" | "watch";
+  score: number | null; vs_btc: number | null; price: number | null;
+  mom_30: number | null; mom_14: number | null; mom_7: number | null;
+  likelihood_rank: number | null; clears: number; clear_days: number;
+  field_rank: number; field_clears: number; field_clear_days: number;
+  ret_90d_pct: number | null; ret_365d_pct: number | null; vol_90d_pct: number | null;
+  max_dd_pct: number | null; off_high_pct: number | null; btc_corr_90d: number | null; btc_beta_90d: number | null;
+  usd_volume_30d: number | null; first_date: string | null; history_days: number;
+  bybit?: { spot: boolean; perp: boolean; turnover_24h: number | null } | null;
+}
+
+export interface GodListPayload {
+  available: boolean;
+  lookback_days?: number;
+  window_start?: string;
+  through_date?: string;
+  live?: string[];
+  watchlist?: string[];
+  coins?: Record<string, GodListCoin>;
+  btc?: Partial<GodListCoin>;
+}
+
+const compactUsd = (v: number | null | undefined) =>
+  v == null ? "—" : v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : `$${(v / 1e3).toFixed(0)}K`;
+const clearsText = (n: number, d: number) => n ? `${n} · ${d}d` : "0";
+
+export function GodListView({ status, params, asOf, godList }: { status: CockpitStatus; params: CockpitParams; asOf: string | null; godList?: GodListPayload | null }) {
+  const coins = godList?.available ? godList.coins ?? {} : {};
+  const liveCount = Object.values(coins).filter(c => c.status === "live").length;
+  const assets = status.assets ?? {};
+  const thrPts = params.rotation_threshold ?? 30;
+  // Live coins show the decision's own numbers; watchlist coins come from the God List.
+  const merged: Record<string, { price?: number | null; score?: number | null; mom_30?: number | null; mom_14?: number | null; mom_7?: number | null }> = {};
+  for (const [a, c] of Object.entries(coins)) merged[a] = c;
+  for (const [a, r] of Object.entries(assets)) merged[a] = r;
+  const btc = merged.BTC?.score ?? godList?.btc?.score ?? null;
+  const rows = Object.entries(merged)
+    .filter(([, r]) => r.score != null)
+    .sort((a, b) => (b[1].score ?? 0) - (a[1].score ?? 0));
+  const watch = (a: string) => coins[a]?.status === "watch";
+  const standing = (asset: string, score: number) => {
+    if (asset === status.position) return <span className="chip hold">Held</span>;
+    if (asset === "BTC") return <span className="chip mute">Benchmark</span>;
+    if (score <= 0) return <span className="chip mute">Score not positive</span>;
+    if (btc == null) return null;
+    const short = btc + thrPts - score;
+    if (short <= 0) return watch(asset) ? <span className="chip warn">Clears · not traded</span> : <span className="chip good">Clears line</span>;
+    return <span className="chip mute">{short.toFixed(1)} pts short</span>;
+  };
+  const profile = Object.entries(coins).sort((a, b) => a[1].field_rank - b[1].field_rank);
+  const thinHistory = (c: Partial<GodListCoin>) => (c.history_days ?? 0) < (godList?.lookback_days ?? 730);
+  const bybitCell = (c: Partial<GodListCoin>) => {
+    const b = c.bybit;
+    if (!b) return "—";
+    if (!b.spot) return <span className="chip warn" title="No Bybit spot market">{b.perp ? "Perp only" : "Not listed"}</span>;
+    return <span title={`Bybit spot 24h turnover${b.perp ? "; perpetual also listed" : ""}`}>{compactUsd(b.turnover_24h)}{b.perp ? "" : " · no perp"}</span>;
+  };
+  const riskCells = (c: Partial<GodListCoin>) => (
+    <>
+      <td className={`r mono ${toneOf(c.ret_365d_pct)}`}>{formatPct(c.ret_365d_pct)}</td>
+      <td className="r mono">{c.vol_90d_pct == null ? "—" : `${c.vol_90d_pct.toFixed(0)}%`}</td>
+      <td className="r mono">{formatPct(c.max_dd_pct, 0)}</td>
+      <td className="r mono">{formatPct(c.off_high_pct, 0)}</td>
+      <td className="r mono" title={c.btc_beta_90d == null ? undefined : `Beta to BTC ${c.btc_beta_90d.toFixed(2)}`}>{c.btc_corr_90d == null ? "—" : c.btc_corr_90d.toFixed(2)}</td>
+      <td className="r mono">{compactUsd(c.usd_volume_30d)}</td>
+      <td className="r mono">{bybitCell(c)}</td>
+      <td className="r mono" title={c.first_date ? `Daily closes since ${c.first_date}` : undefined}>
+        {c.first_date ? c.first_date.slice(0, 7) : "—"}{thinHistory(c) ? <span className="chip sample" style={{ marginLeft: 6 }}>short</span> : null}
+      </td>
+    </>
+  );
+  return (
+    <section className="view on" aria-label="God List">
+      <div className="topbar">
+        <div><h1>God List</h1><p>Momentum scores after the {asOf ?? "latest"} daily decision · crypto only · ranked highest first</p></div>
+      </div>
+      {rows.length === 0 ? (
+        <div className="state"><b>Momentum scores are unavailable</b>The latest decision didn't publish per-coin scores.</div>
+      ) : (
+        <div className="panel">
+          <div className="ph"><h2>Momentum now</h2><span className="sub">0.5×30d + 0.3×14d + 0.2×7d · rotation needs BTC + {thrPts}</span></div>
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="r">#</th><th>Coin</th><th className="r" title="How likely the script is to pick this coin over BTC, ranked by how often it cleared the rotation line in the last two years. Watchlist coins can't be picked.">Likelihood</th><th className="r">Daily close</th><th className="r">Score</th><th className="r">vs BTC</th>
+                  <th className="r">30d</th><th className="r">14d</th><th className="r">7d</th><th>Standing</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(([asset, r], i) => {
+                  const score = r.score ?? 0;
+                  const c = coins[asset];
+                  return (
+                    <tr key={asset}>
+                      <td className="r mono muted">{i + 1}</td>
+                      <td><b>{asset}</b>{watch(asset) && <span className="chip mute" style={{ marginLeft: 6 }}>Watch</span>}</td>
+                      <td className="r mono" title={c && c.status === "live" ? `Cleared the line ${c.clears} times (${c.clear_days} days) since ${godList?.window_start}` : undefined}>
+                        {c?.likelihood_rank ? `${c.likelihood_rank} of ${liveCount}` : "—"}
+                      </td>
+                      <td className="r mono">{formatPrice(r.price)}</td>
+                      <td className={`r mono ${toneOf(score)}`}><b>{score.toFixed(1)}</b></td>
+                      <td className="r mono">{asset === "BTC" || btc == null ? "—" : `${score - btc >= 0 ? "+" : "−"}${Math.abs(score - btc).toFixed(1)}`}</td>
+                      <td className={`r mono ${toneOf(r.mom_30)}`}>{formatPct(r.mom_30)}</td>
+                      <td className={`r mono ${toneOf(r.mom_14)}`}>{formatPct(r.mom_14)}</td>
+                      <td className={`r mono ${toneOf(r.mom_7)}`}>{formatPct(r.mom_7)}</td>
+                      <td>{standing(asset, score)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="rot-note">{rotationNote(status, params)}</p>
+          {godList?.available && (
+            <p className="note" style={{ marginTop: 8 }}>Likelihood ranks the {liveCount} altcoins the script trades by how many separate times each was the rotation target (highest positive score, {thrPts}+ points above BTC) from {godList.window_start} to {godList.through_date}, then by days on target. It ignores the 7-day hold, choppiness and crash rules, so it is a guide to who usually wins, not a forecast. Watch coins are scored the same way but are never traded.</p>
+          )}
+        </div>
+      )}
+      {profile.length > 0 && (
+        <div className="panel">
+          <div className="ph"><h2>Selection profile</h2><span className="sub">{godList?.window_start} to {godList?.through_date} · ranked by times it led the whole field</span></div>
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="r">#</th><th>Coin</th>
+                  <th className="r" title="Separate times (and days) it was the rotation target with every coin on this list competing">Led field</th>
+                  <th className="r" title="Separate times (and days) it would have been the rotation target if it were the only coin added to the live universe. For live coins, the live count.">With live set</th>
+                  <th className="r">1y return</th><th className="r" title="Annualised volatility of daily returns, last 90 days">Volatility</th>
+                  <th className="r" title="Worst peak-to-trough fall in the window">Max drop</th><th className="r" title="Below the window's highest close">Off high</th>
+                  <th className="r" title="Correlation of daily returns with BTC, last 90 days; hover for beta">BTC corr</th>
+                  <th className="r" title="Average daily dollar volume on Binance, last 30 days">Volume 30d</th>
+                  <th className="r" title="Bybit spot 24h turnover — where the account trades">Bybit</th><th className="r">Data from</th>
+                </tr>
+              </thead>
+              <tbody>
+                {godList?.btc && (
+                  <tr className="muted">
+                    <td className="r mono muted">—</td><td><b>BTC</b><span className="chip mute" style={{ marginLeft: 6 }}>Benchmark</span></td>
+                    <td className="r mono">—</td><td className="r mono">—</td>
+                    {riskCells({ ...godList.btc, bybit: null })}
+                  </tr>
+                )}
+                {profile.map(([asset, c]) => (
+                  <tr key={asset}>
+                    <td className="r mono muted">{c.field_rank}</td>
+                    <td><b>{asset}</b>{c.status === "live" ? <span className="chip good" style={{ marginLeft: 6 }}>Live</span> : <span className="chip mute" style={{ marginLeft: 6 }}>Watch</span>}</td>
+                    <td className="r mono">{clearsText(c.field_clears, c.field_clear_days)}</td>
+                    <td className="r mono">{clearsText(c.clears, c.clear_days)}</td>
+                    {riskCells(c)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="note" style={{ marginTop: 8 }}>“Led field” counts the separate runs, and total days, each coin spent as the rotation target with every coin here competing. “With live set” asks what would have happened if only that coin were added to what the script trades today. Coins marked “short” have less than {Math.round((godList?.lookback_days ?? 730) / 365)} years of data, so their counts cover a shorter window. Adding a coin to the live set changes the strategy and needs a backtest and a forward test first.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ChangeTiles({ model }: { model: PerfModel }) {
   return (
     <div className="panel">
